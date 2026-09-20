@@ -404,7 +404,9 @@ body:not([data-page="home"]) .scene-fade{background:rgba(3,9,26,.74)}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:rgba(7,18,46,.97);color:#f4f8ff;border:1px solid var(--line);box-shadow:var(--shadow)}
 .leaflet-popup-content{margin:14px 16px}
 .leaflet-popup-close-button{color:#9fb6da!important}
-.mini-radar .leaflet-control-attribution{display:none}
+.mini-radar .leaflet-control-attribution{font-size:8px!important;padding:0 4px}
+.radar-fallback-msg{position:absolute;left:12px;right:12px;bottom:12px;z-index:3;padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.4;color:var(--ink-2);background:rgba(6,16,38,.88);border:1px solid var(--line)}
+.radar-fallback-msg:empty{display:none}
 
 /* Lite mode: no blur, for slower devices */
 body.lite *{backdrop-filter:none!important}

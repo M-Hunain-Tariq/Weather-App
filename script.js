@@ -1287,12 +1287,14 @@ function startTicker() {
 function loadLeaflet() {
   if (window.L && L.map) return Promise.resolve(true);
   if (loadLeaflet.p) return loadLeaflet.p;
-  const css = href => new Promise((res, rej) => { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; l.onload = res; l.onerror = rej; document.head.appendChild(l); });
-  const js = src => new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); setTimeout(() => rej(new Error("timeout")), 9000); });
+  const css = href => new Promise((res, rej) => { const l = document.createElement("link"), t = setTimeout(() => { l.remove(); rej(new Error("css timeout")); }, 7000); l.rel = "stylesheet"; l.href = href; l.onload = () => { clearTimeout(t); res(); }; l.onerror = () => { clearTimeout(t); l.remove(); rej(new Error("css failed")); }; document.head.appendChild(l); });
+  const js = src => new Promise((res, rej) => { const s = document.createElement("script"), t = setTimeout(() => { s.remove(); rej(new Error("timeout")); }, 9000); s.src = src; s.onload = () => { clearTimeout(t); res(); }; s.onerror = () => { clearTimeout(t); s.remove(); rej(new Error("js failed")); }; document.head.appendChild(s); });
   const SRC = [
+    ["lib/leaflet.css", "lib/leaflet.js"],
     ["https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"],
     ["https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css", "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"],
-    ["https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css", "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"]
+    ["https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css", "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"],
+    ["https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css", "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"]
   ];
   loadLeaflet.p = (async () => {
     for (const [c, j] of SRC) { try { await css(c); await js(j); if (window.L && L.map) return true; } catch { /* try the next CDN */ } }
@@ -1306,12 +1308,30 @@ const BASES = {
   terrain: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", opt: { subdomains: "abc", maxZoom: 17, attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap" } }
 };
 const baseLayer = key => { const b = BASES[key] || BASES.dark; return L.tileLayer(b.url, b.opt); };
-const radarLayer = (f, opacity = 0) => L.tileLayer(Radar.url(f), { opacity, tileSize: 256, maxNativeZoom: 7, maxZoom: 12, zIndex: 400, className: "radar-tiles" });
+/* Base map with an automatic OpenStreetMap fallback if the chosen tile server is blocked */
+function swapBase(map, key) {
+  if (map._base) map.removeLayer(map._base);
+  if (map._alt) { map.removeLayer(map._alt); map._alt = null; }
+  const layer = baseLayer(key); let ok = 0, bad = 0;
+  layer.on("tileload", () => { ok++; });
+  layer.on("tileerror", () => {
+    bad++;
+    if (!ok && bad >= 4 && !map._alt) { map._alt = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map); map._alt.bringToBack(); }
+  });
+  layer.addTo(map); layer.bringToBack(); map._base = layer;
+}
+const radarLayer = (f, opacity = 0) => {
+  const l = L.tileLayer(Radar.url(f), { opacity, tileSize: 256, maxNativeZoom: 7, maxZoom: 12, zIndex: 400, className: "radar-tiles" });
+  l.on("tileload", () => { Radar.ok++; });
+  l.on("tileerror", () => { Radar.bad++; if (Radar.bad >= 8 && !Radar.ok && !Radar.warned) { Radar.warned = true; if (Radar.onFail) Radar.onFail(); } });
+  return l;
+};
 const cityDot = (ll) => L.circleMarker(ll, { radius: 7, color: "#fff", weight: 2, fillColor: "#ff6a3d", fillOpacity: 1 });
-const setLive = (sel, ok) => { const el = $(sel); if (el) { el.classList.toggle("stale", !ok); el.innerHTML = `<span></span>${ok ? "Live" : "Offline"}`; } };
+const setLive = (sel, ok, label) => { const el = $(sel); if (el) { el.classList.toggle("stale", !ok); el.innerHTML = `<span></span>${ok ? "Live" : (label || "Offline")}`; } };
 
 const Radar = {
-  data: null,
+  data: null, ok: 0, bad: 0, warned: false, onFail: null,
+  resetStats() { this.ok = 0; this.bad = 0; this.warned = false; },
   async load(force = false) {
     if (!force && this.data && Date.now() - this.data.at < 5 * 6e4) return this.data;
     const j = await getJSON(API.radar, { retries: 1 });
@@ -1326,24 +1346,27 @@ const Radar = {
 /* Small radar on the home screen */
 const RadarMini = (() => {
   let map, layers = [], i = 0, timer, marker, ready = false, starting = false;
-  const fallback = on => $("#radarFallback").classList.toggle("on", on);
+  const noMap = msg => { $("#radarFallback").classList.toggle("on", !!msg); const m = $("#radarFallbackMsg"); if (m) m.textContent = msg || ""; };
   async function refresh() {
     try {
       const data = await Radar.load(true);
       layers.forEach(l => map.removeLayer(l));
+      Radar.resetStats();
       layers = data.frames.slice(-6).map(f => radarLayer(f, 0).addTo(map));
       i = layers.length - 1; layers[i].setOpacity(.85);
-      fallback(false); setLive("#radarLive", true);
+      noMap(""); setLive("#radarLive", true);
       clearInterval(timer);
       timer = setInterval(() => { if (state.page !== "home" || document.hidden || layers.length < 2) return; layers[i].setOpacity(0); i = (i + 1) % layers.length; layers[i].setOpacity(.85); }, 900);
-    } catch { fallback(true); setLive("#radarLive", false); }
+    } catch { setLive("#radarLive", false, "No radar"); }
   }
   async function init() {
     if (ready || starting) return; starting = true;
-    if (!(await loadLeaflet())) { fallback(true); setLive("#radarLive", false); starting = false; return; }
+    if (!(await loadLeaflet())) { noMap("Map could not load. Check your internet connection and refresh."); setLive("#radarLive", false); starting = false; return; }
     const c = state.city || DEFAULT_CITY;
-    map = L.map("miniRadar", { zoomControl: false, attributionControl: false, scrollWheelZoom: false, minZoom: 3, maxZoom: 10 }).setView([c.latitude, c.longitude], 6);
-    baseLayer("dark").addTo(map);
+    map = L.map("miniRadar", { zoomControl: false, scrollWheelZoom: false, minZoom: 3, maxZoom: 10 }).setView([c.latitude, c.longitude], 6);
+    if (map.attributionControl) map.attributionControl.setPrefix(false);
+    swapBase(map, "dark");
+    Radar.onFail = () => { setLive("#radarLive", false, "No radar"); setLive("#radarLive2", false, "No radar"); const m = $("#radarMsg"); if (m) { m.hidden = false; m.textContent = "Radar tiles are unavailable right now, but the base map still works."; } };
     marker = cityDot([c.latitude, c.longitude]).addTo(map);
     ready = true; starting = false;
     $("#zoomIn").onclick = () => map.zoomIn(); $("#zoomOut").onclick = () => map.zoomOut();
@@ -1379,6 +1402,7 @@ const RadarView = (() => {
     try {
       const data = await Radar.load(force);
       layers.forEach(l => map.removeLayer(l));
+      Radar.resetStats();
       frames = data.frames; layers = frames.map(f => radarLayer(f, 0).addTo(map));
       $("#radarSlider").max = frames.length - 1; idx = 0; show(Math.max(0, data.past - 1));
       msg(""); setLive("#radarLive2", true);
@@ -1390,9 +1414,10 @@ const RadarView = (() => {
     if (!(await loadLeaflet())) { msg("The map library could not be loaded. Please check your internet connection and reload the page."); busy = false; return; }
     const c = state.city || DEFAULT_CITY;
     map = L.map("radarMap", { minZoom: 3, maxZoom: 10 }).setView([c.latitude, c.longitude], 6);
-    baseL = baseLayer("dark").addTo(map);
+    swapBase(map, "dark");
     marker = cityDot([c.latitude, c.longitude]).addTo(map).bindTooltip(c.name);
     ready = true; busy = false;
+    setTimeout(() => map.invalidateSize(), 450);
     $("#radarPlay").onclick = () => play(!playing);
     $("#radarSlider").oninput = e => { play(false); show(Number(e.target.value)); };
     $("#radarOpacity").oninput = e => { opacity = e.target.value / 100; layers[idx]?.setOpacity(opacity); };
@@ -1400,13 +1425,13 @@ const RadarView = (() => {
     $("#radarBase").onclick = e => {
       const b = e.target.closest("button"); if (!b) return;
       $$("#radarBase button").forEach(x => x.classList.toggle("on", x === b));
-      map.removeLayer(baseL); baseL = baseLayer(b.dataset.base).addTo(map); baseL.bringToBack();
+      swapBase(map, b.dataset.base);
     };
     await load(false);
     setInterval(() => { if (state.page === "radar" && !document.hidden) load(true); }, 5 * 6e4);
   }
   return {
-    ensure, stop() { play(false); },
+    ensure, stop() { play(false); }, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); },
     onCity() { if (!ready) return; const c = state.city; marker.setLatLng([c.latitude, c.longitude]).setTooltipContent(c.name); map.flyTo([c.latitude, c.longitude], map.getZoom()); }
   };
 })();
@@ -1495,14 +1520,15 @@ const MapsView = (() => {
     if (busy) return; busy = true;
     if (!(await loadLeaflet())) { msg("The map library could not be loaded. Please check your internet connection and reload the page."); busy = false; return; }
     map = L.map("worldMap", { minZoom: 2, maxZoom: 12, worldCopyJump: true }).setView([30, 70], 5);
-    baseL = baseLayer("dark").addTo(map);
+    swapBase(map, "dark");
     map.on("click", e => pointWeather(e.latlng));
     ready = true; busy = false;
+    setTimeout(() => map.invalidateSize(), 450);
     $("#mapSet").onclick = e => { const b = e.target.closest("button"); if (b) setCities(b.dataset.set); };
     $("#mapBase").onclick = e => {
       const b = e.target.closest("button"); if (!b) return;
       $$("#mapBase button").forEach(x => x.classList.toggle("on", x === b));
-      map.removeLayer(baseL); baseL = baseLayer(b.dataset.base).addTo(map); baseL.bringToBack();
+      swapBase(map, b.dataset.base);
     };
     $("#mapRadar").onchange = async e => {
       if (radarL) { map.removeLayer(radarL); radarL = null; }
@@ -1516,7 +1542,7 @@ const MapsView = (() => {
     };
     await setCities(set);
   }
-  return { ensure, onCity() { if (ready) setCities(set); } };
+  return { ensure, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); }, onCity() { if (ready) setCities(set); } };
 })();
 
 /* ---------- 15. SETTINGS UI ---------- */
@@ -1718,6 +1744,7 @@ function bindEvents() {
   document.addEventListener("pointerdown", () => Ambience.resume(), { passive: true });
   document.addEventListener("click", e => { if (!e.target.closest(".weather-search")) hideSuggest(); if (!e.target.closest(".loc-wrap")) closeLocMenu(); });
   window.addEventListener("hashchange", route);
+  window.addEventListener("resize", debounce(() => { RadarMini.invalidate(); RadarView.invalidate(); MapsView.invalidate(); }, 200));
   window.addEventListener("online", () => { if (state.city) loadCity(state.city, { silent: true }); });
 }
 async function init() {
