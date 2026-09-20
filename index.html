@@ -292,6 +292,7 @@
                 <div class="seg" id="radarBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button><button type="button" data-base="streets">Streets</button><button type="button" data-base="terrain">Terrain</button></div></div>
               <div class="opt-row"><span>Radar opacity</span><input class="range" id="radarOpacity" type="range" min="20" max="100" value="80" aria-label="Radar opacity"></div>
               <button class="pill-btn wide" id="radarCenter" type="button"><svg class="i"><use href="#i-target"/></svg><span>Centre on my city</span></button>
+              <button class="pill-btn wide live-btn" id="radarLocate" type="button"><svg class="i"><use href="#i-target"/></svg><span>Live location</span></button>
             </div>
           </aside>
         </div>
@@ -300,12 +301,13 @@
       <!-- ================= MAPS ================= -->
       <section class="page" id="page-maps" data-title="Maps">
         <div class="page-head">
-          <div><h2>Weather Map</h2><p>Live weather for cities, towns and villages. Zoom in to see smaller places, or click anywhere on the map.</p></div>
+          <div><h2>Weather Map</h2><p>Names of cities, towns and villages. Click any name or any spot on the map to see its live temperature and weather.</p></div>
           <div class="head-actions">
             <div class="map-search"><svg class="i"><use href="#i-search"/></svg><input id="mapSearch" type="text" placeholder="Find any town or village…" autocomplete="off" spellcheck="false" aria-label="Search a place on the map"><ul class="suggest-list" id="mapSuggest" hidden></ul></div>
             <div class="seg" id="mapSet"><button type="button" class="on" data-set="pk">Pakistan</button><button type="button" data-set="world">World</button><button type="button" data-set="saved">Saved</button></div>
             <div class="seg" id="mapBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button><button type="button" data-base="streets">Streets</button><button type="button" data-base="terrain">Terrain</button></div>
-            <label class="switch-chip"><input type="checkbox" id="mapTowns" data-switch="mapTowns"><span>Nearby towns</span></label>
+            <label class="switch-chip"><input type="checkbox" id="mapTowns" data-switch="mapTowns"><span>All place names</span></label>
+            <button class="pill-btn live-btn" id="mapLocate" type="button"><svg class="i"><use href="#i-target"/></svg><span>Live location</span></button>
             <label class="switch-chip"><input type="checkbox" id="mapRadar"><span>Radar overlay</span></label>
           </div>
         </div>

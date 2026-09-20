@@ -14,7 +14,7 @@ const API = {
   air: "https://air-quality-api.open-meteo.com/v1/air-quality",
   reverse: "https://nominatim.openstreetmap.org/reverse",
   search: "https://nominatim.openstreetmap.org/search",
-  overpass: ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"],
+  overpass: ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"],
   radar: "https://api.rainviewer.com/public/weather-maps.json"
 };
 
@@ -25,7 +25,7 @@ const DEFAULTS = {
   voiceOn: true, voiceLang: "en", voiceName: "", voiceRate: 1, voicePitch: 1, autoSpeak: false,
   soundOn: false, soundVol: 0.5,
   sceneStyle: "live", motion: "auto", quality: "balanced", autoRefresh: "15",
-  mapBase: "dark", mapTowns: true, v: 2
+  mapBase: "streets", mapTowns: true, v: 3
 };
 
 const PK_CITIES = [
@@ -85,7 +85,8 @@ const store = {
 };
 const _stored = store.get("settings", {});
 if ((_stored.v || 1) < 2) _stored.sceneStyle = "live";      // v2: scene follows the real time of day
-let settings = Object.assign({}, DEFAULTS, _stored, { v: 2 });
+if ((_stored.v || 1) < 3) _stored.mapBase = "streets";      // v3: full-detail map by default
+let settings = Object.assign({}, DEFAULTS, _stored, { v: 3 });
 settings.autoRefresh = String(settings.autoRefresh);
 
 const state = {
@@ -312,7 +313,7 @@ const Scene = (() => {
   }
   function buildStaticOnce() {
     const r = rng(9);
-    stars = Array.from({ length: 150 }, () => ({ x: r(), y: r() * .92, r: r() * 1.3 + .3, p: r() * 6.28, s: .5 + r() * 1.5 }));
+    stars = Array.from({ length: 280 }, () => { const big = r() < .09; return { x: r(), y: r() * .93, r: big ? 1.5 + r() * .8 : r() * 1.2 + .3, p: r() * 6.28, s: .6 + r() * 2.2, b: big ? 1 : .45 + r() * .55, c: ["#ffffff", "#cfe0ff", "#fff1cf", "#ffd8cc"][Math.floor(r() * 4)], big }; });
     sprites = [1, 2, 3, 4, 5].map(makeSprite);
     const rc = rng(77);
     clouds = Array.from({ length: 12 }, (_, i) => ({ sp: sprites[i % 5], x: (i % 4 === 0) ? .2 + rc() * .5 : rc() * 1.3 - .15, y: .05 + rc() * .7, s: .45 + rc() * .85, v: .5 + rc(), thr: .04 + i / 12 * .9, track: i % 4 === 0, off: rc() - .5 }));
@@ -373,11 +374,16 @@ const Scene = (() => {
   function drawStars() {
     const vis = P.night * (1 - P.ov * .95) * (1 - P.fog) * (1 - P.haze * .7);
     if (vis < .03) return;
-    g.fillStyle = "#fff";
-    for (const s of stars) {
-      const tw = .55 + .45 * Math.sin(time * s.s + s.p);
-      g.globalAlpha = vis * tw * .9;
-      g.beginPath(); g.arc(s.x * W, s.y * hy, s.r, 0, 6.283); g.fill();
+    for (const s of stars) {                       // real stars scintillate: quick, irregular flicker, brief sparkles and dim-outs
+      const f1 = Math.sin(time * s.s * 2.4 + s.p), f2 = Math.sin(time * s.s * 6.1 + s.p * 2.3), f3 = Math.sin(time * .7 * s.s + s.p * 5);
+      let tw = .5 + .32 * f1 + .28 * f1 * f2;
+      if (f3 > .9) tw += (f3 - .9) * 7;
+      if (f2 < -.85) tw *= .35;
+      tw = clamp(tw, .1, 1.5);
+      const x = s.x * W, y = s.y * hy;
+      g.globalAlpha = clamp(vis * tw * s.b, 0, 1); g.fillStyle = s.c;
+      g.beginPath(); g.arc(x, y, s.r * (.8 + .3 * tw), 0, 6.283); g.fill();
+      if (s.big && tw > 1) { const ln = s.r * 5 * (tw - .7); g.strokeStyle = s.c; g.lineWidth = .8; g.beginPath(); g.moveTo(x - ln, y); g.lineTo(x + ln, y); g.moveTo(x, y - ln); g.lineTo(x, y + ln); g.stroke(); }
     }
     g.globalAlpha = 1;
     if (shoot) {
@@ -1452,7 +1458,8 @@ function swapBase(map, key) {
     if (!ok && bad >= 4 && !map._alt) { map._alt = altBase(key).addTo(map); map._alt.bringToBack(); if (map._lbl) { map.removeLayer(map._lbl); map._lbl = null; } }
   });
   layer.addTo(map); layer.bringToBack(); map._base = layer;
-  if (b.labels) map._lbl = L.tileLayer(b.labels, { maxNativeZoom: b.lz || 13, maxZoom: 19, zIndex: 5 }).addTo(map);
+  if (map._labels) map._labels.setOn(overlayWanted(key));
+  if (b.labels && !overlayWanted(key)) map._lbl = L.tileLayer(b.labels, { maxNativeZoom: b.lz || 13, maxZoom: 19, zIndex: 5 }).addTo(map);
 }
 /* One map style shared by every map in the app: choose Satellite once and all maps switch */
 const allMaps = [], BASE_ORDER = ["dark", "sat", "streets", "terrain"];
@@ -1460,7 +1467,8 @@ function syncBaseUI() {
   $$("#radarBase button, #mapBase button, [data-seg='mapBase'] button").forEach(b => b.classList.toggle("on", (b.dataset.base || b.dataset.value) === settings.mapBase));
   const s = $("#miniBase span"); if (s) s.textContent = (BASES[settings.mapBase] || BASES.dark).name;
 }
-function registerMap(map) { allMaps.push(map); swapBase(map, settings.mapBase); }
+const overlayWanted = key => !!settings.mapTowns && (key === "dark" || key === "sat");
+function registerMap(map) { allMaps.push(map); attachLabels(map); map.on("click", e => onMapClick(map, e.latlng)); swapBase(map, settings.mapBase); }
 function setMapBase(key) {
   if (!BASES[key]) key = "dark";
   settings.mapBase = key; store.set("settings", settings);
@@ -1476,6 +1484,144 @@ const radarLayer = (f, opacity = 0) => {
 };
 const cityDot = (ll) => L.circleMarker(ll, { radius: 7, color: "#fff", weight: 2, fillColor: "#ff6a3d", fillOpacity: 1 });
 const setLive = (sel, ok, label) => { const el = $(sel); if (el) { el.classList.toggle("stale", !ok); el.innerHTML = `<span></span>${ok ? "Live" : (label || "Offline")}`; } };
+
+/* ---------- Place names (cities, towns, villages) from OpenStreetMap ---------- */
+const Places = (() => {
+  const cache = new Map(), covered = [], RANK = { city: 0, town: 1, village: 2, hamlet: 3 };
+  let busy = false;
+  const tierFor = z => z >= 13 ? 3 : z >= 10 ? 2 : z >= 8 ? 1 : 0;      // which kinds of places to show at this zoom
+  PK_CITIES.concat(WORLD_CITIES).forEach(([name, lat, lon]) => cache.set("seed:" + name, { id: "seed:" + name, name, type: "city", pop: 1e7, lat, lon }));
+  const pad = (b, f) => { const dy = (b.getNorth() - b.getSouth()) * f, dx = (b.getEast() - b.getWest()) * f; return { s: b.getSouth() - dy, n: b.getNorth() + dy, w: b.getWest() - dx, e: b.getEast() + dx }; };
+  const isCovered = (r, tier) => covered.some(c => c.tier >= tier && c.s <= r.s && c.n >= r.n && c.w <= r.w && c.e >= r.e);
+  function query(r, tier) {
+    const bb = `${r.s.toFixed(4)},${r.w.toFixed(4)},${r.n.toFixed(4)},${r.e.toFixed(4)}`;
+    let q = "[out:json][timeout:25];";
+    if (tier === 0) q += `node["place"="city"](${bb});out 200;`;
+    else if (tier === 1) q += `node["place"~"^(city|town)$"](${bb});out 400;`;
+    else q += `node["place"~"^(city|town)$"](${bb});out 300;node["place"="village"](${bb});out 700;` + (tier >= 3 ? `node["place"="hamlet"](${bb});out 700;` : "");
+    return q;
+  }
+  async function ensure(bounds, z) {
+    if (z < 6) return false;
+    const tier = tierFor(z), r = pad(bounds, .25);
+    if ((r.n - r.s) * (r.e - r.w) > (tier >= 2 ? 40 : 400)) return false;
+    if (isCovered(r, tier)) return false;
+    if (busy) return "busy";
+    busy = true;
+    try {
+      const q = query(r, tier);
+      for (const u of API.overpass) {
+        try {
+          const j = await getJSON(`${u}?data=${encodeURIComponent(q)}`, { retries: 0, timeout: 22000 });
+          (j.elements || []).forEach(el => {
+            const t = el.tags || {}, name = t["name:en"] || t.int_name || t.name;
+            if (!name || !t.place || cache.has(el.id)) return;
+            cache.set(el.id, { id: el.id, name, type: t.place, pop: +t.population || 0, lat: el.lat, lon: el.lon });
+          });
+          covered.push({ s: r.s, n: r.n, w: r.w, e: r.e, tier });
+          return true;
+        } catch { /* try the next server */ }
+      }
+    } finally { busy = false; }
+    return false;
+  }
+  function inView(b, tier) {
+    const out = [], s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
+    cache.forEach(p => { if (RANK[p.type] <= tier && p.lat >= s && p.lat <= n && p.lon >= w && p.lon <= e) out.push(p); });
+    return out.sort((a, c) => RANK[a.type] - RANK[c.type] || c.pop - a.pop || a.name.length - c.name.length);
+  }
+  return { ensure, inView, tierFor };
+})();
+
+/* Name labels drawn on the map (no temperatures, so the names stay readable). Click a name to see its weather. */
+function attachLabels(map) {
+  const group = L.layerGroup().addTo(map); let tok = 0, on = false;
+  const FS = { city: 13.5, town: 12.5, village: 11.5, hamlet: 10.5 };
+  function render() {
+    group.clearLayers();
+    const z = map.getZoom(); if (!on || z < 5) return;
+    const list = Places.inView(map.getBounds(), Places.tierFor(z)), size = map.getSize(), taken = []; let n = 0;
+    for (const p of list) {
+      const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+      if (pt.x < -10 || pt.y < -10 || pt.x > size.x + 10 || pt.y > size.y + 10) continue;
+      const fs = FS[p.type] || 11, w = p.name.length * fs * .58 + 16;
+      const rc = { x1: pt.x - 4, x2: pt.x + 6 + w, y1: pt.y - fs * .9, y2: pt.y + fs * .9 };
+      if (taken.some(o => rc.x1 < o.x2 && rc.x2 > o.x1 && rc.y1 < o.y2 && rc.y2 > o.y1)) continue;   // never let two names overlap
+      taken.push(rc);
+      L.marker([p.lat, p.lon], { icon: L.divIcon({ className: `place-label t-${p.type}`, html: `<i></i><span>${esc(p.name)}</span>`, iconSize: [0, 0] }), keyboard: false, zIndexOffset: p.type === "city" ? 300 : 0 })
+        .on("click", e => { L.DomEvent.stopPropagation(e); showPlaceWeather(map, { name: p.name, latitude: p.lat, longitude: p.lon }); }).addTo(group);
+      if (++n >= 240) break;
+    }
+  }
+  async function refresh() {
+    const my = ++tok; render();
+    if (!on) return;
+    let res = false;
+    try { res = await Places.ensure(map.getBounds(), map.getZoom()); } catch { /* keep the map usable */ }
+    if (my !== tok) return;
+    if (res === "busy") setTimeout(() => { if (on) refresh(); }, 1600); else if (res) render();
+  }
+  map.on("moveend", debounce(refresh, 350));
+  map._labels = { setOn(v) { on = v; refresh(); }, refresh };
+}
+
+/* Weather popup for any place or any spot on the map */
+function weatherPopupEl(map, loc, cur, tz) {
+  const info = wxInfo(cur.weather_code, !!cur.is_day), el = document.createElement("div"), sub = [loc.admin1, loc.country].filter(Boolean).join(", ");
+  el.className = "map-pop";
+  el.innerHTML = `<h4>${esc(loc.name)}</h4>${sub ? `<small class="pop-sub">${esc(sub)}</small>` : ""}<div class="row">${wxIcon(info.kind, !!cur.is_day)}<strong>${fmt.tu(cur.temperature_2m)}</strong></div><p><b>${info.en}</b> · Feels like ${fmt.tu(cur.apparent_temperature ?? cur.temperature_2m)}<br>${fmt.wind(cur.wind_speed_10m)} wind · ${Math.round(cur.relative_humidity_2m)}% humidity</p><button type="button">Open dashboard</button>`;
+  $("button", el).addEventListener("click", () => { map.closePopup(); loadCity({ name: loc.name, admin1: loc.admin1 || "", country: loc.country || "", latitude: +loc.latitude, longitude: +loc.longitude, timezone: tz || "" }); location.hash = "#/home"; });
+  return el;
+}
+async function showPlaceWeather(map, loc, ll) {
+  const at = ll || [loc.latitude, loc.longitude];
+  const pop = L.popup({ minWidth: 200 }).setLatLng(at).setContent('<div class="map-pop"><p>Loading weather…</p></div>').openOn(map);
+  try {
+    const w = await getJSON(`${API.forecast}?latitude=${(+loc.latitude).toFixed(3)}&longitude=${(+loc.longitude).toFixed(3)}&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,relative_humidity_2m&timezone=auto`);
+    pop.setContent(weatherPopupEl(map, loc, w.current, w.timezone));
+  } catch { pop.setContent('<div class="map-pop"><p>Could not load the weather for this place.</p></div>'); }
+}
+async function onMapClick(map, ll) {
+  const cp = map.latLngToContainerPoint(ll); let best = null, bd = 34;
+  Places.inView(map.getBounds(), Places.tierFor(map.getZoom())).forEach(p => {
+    const q = map.latLngToContainerPoint([p.lat, p.lon]), d = Math.hypot(q.x - cp.x, q.y - cp.y);
+    if (d < bd) { bd = d; best = p; }
+  });
+  if (best) { showPlaceWeather(map, { name: best.name, latitude: best.lat, longitude: best.lon }); return; }
+  L.popup().setLatLng(ll).setContent('<div class="map-pop"><p>Finding place…</p></div>').openOn(map);
+  const rev = await reverseGeo(ll.lat, ll.lng).catch(() => null);
+  showPlaceWeather(map, { name: rev?.name || `${ll.lat.toFixed(2)}, ${ll.lng.toFixed(2)}`, admin1: rev?.admin1 || "", country: rev?.country || "", latitude: ll.lat, longitude: ll.lng }, [ll.lat, ll.lng]);
+}
+
+/* "Live location": follows you on the map and shows your place name, temperature and weather */
+const LiveLoc = (() => {
+  let watch = null, map = null, dot = null, ring = null, first = true;
+  const ui = on => $$(".live-btn").forEach(b => { b.classList.toggle("on", on); const s = $("span", b); if (s) s.textContent = on ? "Live: on" : "Live location"; });
+  async function here() {
+    if (!dot || !map) return;
+    const ll = dot.getLatLng(), rev = await reverseGeo(ll.lat, ll.lng).catch(() => null);
+    showPlaceWeather(map, { name: rev?.name || "Your location", admin1: rev?.admin1 || "", country: rev?.country || "", latitude: ll.lat, longitude: ll.lng }, [ll.lat, ll.lng]);
+  }
+  function stop() {
+    if (watch != null && navigator.geolocation) navigator.geolocation.clearWatch(watch);
+    watch = null; [dot, ring].forEach(l => { if (l && map) map.removeLayer(l); }); dot = ring = null; ui(false);
+  }
+  function start(m) {
+    if (!navigator.geolocation) { toast("Location is not supported in this browser."); return; }
+    if (watch != null) stop();
+    map = m; first = true; ui(true); toast("Finding your live location…");
+    watch = navigator.geolocation.watchPosition(pos => {
+      const ll = [pos.coords.latitude, pos.coords.longitude], acc = pos.coords.accuracy || 30;
+      if (!dot) {
+        dot = L.marker(ll, { icon: L.divIcon({ className: "live-dot", html: "<i></i>", iconSize: [0, 0] }), zIndexOffset: 1000 }).addTo(map);
+        ring = L.circle(ll, { radius: acc, weight: 1, color: "#4f8dff", fillColor: "#4f8dff", fillOpacity: .12, interactive: false }).addTo(map);
+        dot.on("click", e => { L.DomEvent.stopPropagation(e); here(); });
+      } else { dot.setLatLng(ll); ring.setLatLng(ll).setRadius(acc); }
+      if (first) { first = false; map.flyTo(ll, Math.max(map.getZoom(), 13), { duration: 1.2 }); setTimeout(here, 1300); }
+    }, () => { stop(); toast("Could not get your location. Please allow location access (it works on https or localhost)."); }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+  }
+  return { toggle(m) { if (watch != null && map === m) stop(); else start(m); }, stop };
+})();
 
 const Radar = {
   data: null, ok: 0, bad: 0, warned: false, onFail: null,
@@ -1571,6 +1717,7 @@ const RadarView = (() => {
     $("#radarSlider").oninput = e => { play(false); show(Number(e.target.value)); };
     $("#radarOpacity").oninput = e => { opacity = e.target.value / 100; layers[idx]?.setOpacity(opacity); };
     $("#radarCenter").onclick = () => { const s = state.city; map.flyTo([s.latitude, s.longitude], 6); };
+    $("#radarLocate").onclick = () => LiveLoc.toggle(map);
     $("#radarBase").onclick = e => { const b = e.target.closest("button"); if (b) setMapBase(b.dataset.base); };
     await load(false);
     setInterval(() => { if (state.page === "radar" && !document.hidden) load(true); }, 5 * 6e4);
@@ -1596,7 +1743,7 @@ function renderRainOutlook() {
 
 /* Maps page: temperatures across cities + click anywhere */
 const MapsView = (() => {
-  let map, baseL, radarL, markers = [], rows = [], ready = false, busy = false, set = "pk", cache = {};
+  let map, radarL, cityMark, rows = [], ready = false, busy = false, set = "pk", cache = {};
   const msg = t => { const m = $("#mapsMsg"); m.hidden = !t; if (t) m.textContent = t; };
   function cities() {
     if (set === "pk") return PK_CITIES.map(([name, latitude, longitude]) => ({ name, latitude, longitude, country: "Pakistan" }));
@@ -1605,24 +1752,6 @@ const MapsView = (() => {
     return state.favorites.concat(state.recents).filter(c => !seen.has(locKey(c)) && seen.add(locKey(c)));
   }
   const near = (a, b) => Math.abs(a.latitude - b.latitude) < .15 && Math.abs(a.longitude - b.longitude) < .15;
-  function popupEl(name, cur, loc) {
-    const info = wxInfo(cur.weather_code, !!cur.is_day), el = document.createElement("div");
-    el.className = "map-pop";
-    el.innerHTML = `<h4>${esc(name)}</h4><div class="row">${wxIcon(info.kind, !!cur.is_day)}<strong>${fmt.tu(cur.temperature_2m)}</strong></div><p>${info.en} · ${fmt.wind(cur.wind_speed_10m)} wind · ${Math.round(cur.relative_humidity_2m)}% humidity</p><button type="button">Open dashboard</button>`;
-    $("button", el).addEventListener("click", () => { map.closePopup(); loadCity(loc); location.hash = "#/home"; });
-    return el;
-  }
-  async function pointWeather(ll, known) {
-    const pop = L.popup().setLatLng(ll).setContent('<div class="map-pop"><p>Loading weather…</p></div>').openOn(map);
-    try {
-      const [w, rev] = await Promise.all([
-        getJSON(`${API.forecast}?latitude=${ll.lat.toFixed(3)}&longitude=${ll.lng.toFixed(3)}&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&timezone=auto`),
-        known ? Promise.resolve(known) : reverseGeo(ll.lat, ll.lng).catch(() => null)
-      ]);
-      const name = rev?.name || `${ll.lat.toFixed(2)}, ${ll.lng.toFixed(2)}`;
-      pop.setContent(popupEl(name, w.current, { name, admin1: rev?.admin1 || "", country: rev?.country || "", latitude: ll.lat, longitude: ll.lng, timezone: w.timezone }));
-    } catch { pop.setContent('<div class="map-pop"><p>Could not load weather for this point.</p></div>'); }
-  }
   function fit(list) {
     if (set === "pk") map.fitBounds([[23.6, 60.8], [37, 77.2]], { padding: [10, 10] });
     else if (set === "world") map.setView([28, 45], 2);
@@ -1630,15 +1759,8 @@ const MapsView = (() => {
     else if (list.length) map.fitBounds(L.latLngBounds(list.map(c => [c.latitude, c.longitude])), { padding: [40, 40], maxZoom: 8 });
   }
   function render(list, arr) {
-    markers.forEach(m => map.removeLayer(m)); markers = [];
     rows = list.map((c, i) => ({ c, cur: arr[i]?.current })).filter(r => r.cur);
-    rows.forEach(r => {
-      const info = wxInfo(r.cur.weather_code, !!r.cur.is_day), on = state.city && near(r.c, state.city);
-      r.info = info;
-      r.marker = L.marker([r.c.latitude, r.c.longitude], { icon: L.divIcon({ className: "wx-marker", iconSize: [0, 0], html: `<div class="wx-pin${on ? " on" : ""}">${wxIcon(info.kind, !!r.cur.is_day)}<span>${fmt.tu(r.cur.temperature_2m)}</span></div>` }) }).addTo(map);
-      r.marker.on("click", e => { L.DomEvent.stopPropagation(e); L.popup().setLatLng([r.c.latitude, r.c.longitude]).setContent(popupEl(r.c.name, r.cur, Object.assign({ timezone: "" }, r.c))).openOn(map); });
-      markers.push(r.marker);
-    });
+    rows.forEach(r => { r.info = wxInfo(r.cur.weather_code, !!r.cur.is_day); });
     const sorted = rows.slice().sort((a, b) => b.cur.temperature_2m - a.cur.temperature_2m);
     if (sorted.length > 1) {
       const hot = sorted[0], cold = sorted[sorted.length - 1];
@@ -1646,10 +1768,10 @@ const MapsView = (() => {
     } else $("#mapExtremes").innerHTML = "";
     $("#mapCityList").innerHTML = sorted.map(r => `<li><button type="button" data-i="${rows.indexOf(r)}" class="${state.city && near(r.c, state.city) ? "on" : ""}">${wxIcon(r.info.kind, !!r.cur.is_day)}<span><b>${esc(r.c.name)}</b><small>${r.info.en} · ${fmt.wind(r.cur.wind_speed_10m)}</small></span><b>${fmt.tu(r.cur.temperature_2m)}</b></button></li>`).join("");
   }
-  async function setCities(key) {
+  async function setCities(key, refit = true) {
     set = key; $$("#mapSet button").forEach(b => b.classList.toggle("on", b.dataset.set === key));
     const list = cities();
-    if (!list.length) { markers.forEach(m => map.removeLayer(m)); markers = []; rows = []; $("#mapExtremes").innerHTML = ""; $("#mapCityList").innerHTML = '<li class="muted" style="padding:10px 6px">Tap the star on the home screen to save cities. Your saved and recent cities will appear here.</li>'; return; }
+    if (!list.length) { rows = []; $("#mapExtremes").innerHTML = ""; $("#mapCityList").innerHTML = '<li class="muted" style="padding:10px 6px">Tap the star on the home screen to save cities. Your saved and recent cities will appear here.</li>'; return; }
     const ck = key + ":" + list.map(locKey).join("|");
     let d = cache[ck];
     try {
@@ -1657,49 +1779,12 @@ const MapsView = (() => {
         const j = await getJSON(`${API.forecast}?latitude=${list.map(c => (+c.latitude).toFixed(3)).join(",")}&longitude=${list.map(c => (+c.longitude).toFixed(3)).join(",")}&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&timezone=auto`);
         d = cache[ck] = { at: Date.now(), arr: Array.isArray(j) ? j : [j] };
       }
-      msg(""); render(list, d.arr); fit(list);
+      msg(""); render(list, d.arr); if (refit) fit(list);
     } catch { msg("Could not load city temperatures. Please check your connection and try again."); }
   }
-  /* Nearby towns & villages (from OpenStreetMap) with live weather, so even small places show up */
-  let townMarks = [], townBusy = false, townKey = "", townTok = 0;
-  const clearTowns = () => { townMarks.forEach(m => map.removeLayer(m)); townMarks = []; };
-  async function fetchPlaces(b) {
-    const bb = `${b.getSouth().toFixed(4)},${b.getWest().toFixed(4)},${b.getNorth().toFixed(4)},${b.getEast().toFixed(4)}`;
-    const q = `[out:json][timeout:15];(node["place"~"^(city|town)$"](${bb});node["place"="village"](${bb}););out 220;`;
-    for (const u of API.overpass) { try { const j = await getJSON(`${u}?data=${encodeURIComponent(q)}`, { retries: 0, timeout: 16000 }); return j.elements || []; } catch { /* next mirror */ } }
-    return [];
-  }
-  async function loadTowns(force) {
-    if (!map) return;
-    const z = map.getZoom();
-    if (!settings.mapTowns || z < 9) { clearTowns(); townKey = ""; return; }
-    const b = map.getBounds(), key = [z, b.getSouth().toFixed(1), b.getWest().toFixed(1)].join();
-    if (townBusy || (!force && key === townKey)) return;
-    townBusy = true; townKey = key; const tok = ++townTok;
-    try {
-      const rank = { city: 0, town: 1, village: 2 };
-      let places = (await fetchPlaces(b)).map(p => ({ name: p.tags["name:en"] || p.tags.name, type: p.tags.place, pop: +p.tags.population || 0, latitude: p.lat, longitude: p.lon })).filter(p => p.name);
-      places.sort((x, y) => rank[x.type] - rank[y.type] || y.pop - x.pop);
-      const cityPts = rows.map(r => r.c);
-      places = places.filter(p => !cityPts.some(c => Math.abs(c.latitude - p.latitude) < .05 && Math.abs(c.longitude - p.longitude) < .05)).slice(0, z >= 11 ? 45 : z >= 10 ? 36 : 26);
-      if (!places.length || tok !== townTok) return;
-      const j = await getJSON(`${API.forecast}?latitude=${places.map(p => p.latitude.toFixed(3)).join(",")}&longitude=${places.map(p => p.longitude.toFixed(3)).join(",")}&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&timezone=auto`);
-      const arr = Array.isArray(j) ? j : [j];
-      if (tok !== townTok) return;
-      clearTowns();
-      places.forEach((p, i) => {
-        const cur = arr[i]?.current; if (!cur) return;
-        const info = wxInfo(cur.weather_code, !!cur.is_day);
-        const m = L.marker([p.latitude, p.longitude], { icon: L.divIcon({ className: "wx-marker", iconSize: [0, 0], html: `<div class="wx-pin town">${wxIcon(info.kind, !!cur.is_day)}<span>${fmt.tu(cur.temperature_2m)}</span><small>${esc(p.name)}</small></div>` }) }).addTo(map);
-        m.on("click", e => { L.DomEvent.stopPropagation(e); L.popup().setLatLng([p.latitude, p.longitude]).setContent(popupEl(p.name, cur, { name: p.name, admin1: "", country: "", latitude: p.latitude, longitude: p.longitude, timezone: "" })).openOn(map); });
-        townMarks.push(m);
-      });
-    } catch { /* keep the map usable if the towns service is busy */ }
-    finally { townBusy = false; if (map) loadTowns(); }
-  }
   function goTo(s) {
-    map.flyTo([s.latitude, s.longitude], 12, { duration: 1.2 });
-    setTimeout(() => pointWeather({ lat: s.latitude, lng: s.longitude }, s), 1300);
+    map.flyTo([s.latitude, s.longitude], 13, { duration: 1.2 });
+    setTimeout(() => showPlaceWeather(map, s), 1300);
   }
   function bindMapSearch() {
     const input = $("#mapSearch"), ul = $("#mapSuggest"); let sugg = [], tok = 0;
@@ -1726,13 +1811,15 @@ const MapsView = (() => {
     if (ready) { map.invalidateSize(); return; }
     if (busy) return; busy = true;
     if (!(await loadLeaflet())) { msg("The map library could not be loaded. Please check your internet connection and reload the page."); busy = false; return; }
+    const c = state.city || DEFAULT_CITY;
     map = L.map("worldMap", { minZoom: 2, maxZoom: 18, worldCopyJump: true }).setView([30, 70], 5);
     registerMap(map);
-    map.on("click", e => pointWeather(e.latlng));
+    cityMark = cityDot([c.latitude, c.longitude]).addTo(map).bindTooltip(c.name);
     ready = true; busy = false;
     setTimeout(() => map.invalidateSize(), 450);
     $("#mapSet").onclick = e => { const b = e.target.closest("button"); if (b) setCities(b.dataset.set); };
     $("#mapBase").onclick = e => { const b = e.target.closest("button"); if (b) setMapBase(b.dataset.base); };
+    $("#mapLocate").onclick = () => LiveLoc.toggle(map);
     $("#mapRadar").onchange = async e => {
       if (radarL) { map.removeLayer(radarL); radarL = null; }
       if (e.target.checked) { try { const d = await Radar.load(); radarL = radarLayer(d.frames[Math.max(0, d.past - 1)], .7).addTo(map); } catch { toast("Live radar is unavailable right now."); e.target.checked = false; } }
@@ -1740,16 +1827,16 @@ const MapsView = (() => {
     $("#mapCityList").onclick = e => {
       const b = e.target.closest("button[data-i]"); if (!b) return;
       const r = rows[Number(b.dataset.i)]; if (!r) return;
-      map.flyTo([r.c.latitude, r.c.longitude], Math.max(map.getZoom(), 7));
-      setTimeout(() => r.marker.fire("click"), 700);
+      map.flyTo([r.c.latitude, r.c.longitude], Math.max(map.getZoom(), 8), { duration: 1 });
+      setTimeout(() => showPlaceWeather(map, r.c), 1100);
     };
-    const compact = () => { const z = map.getZoom(); $("#worldMap").classList.toggle("map-compact", z <= 5); $("#worldMap").classList.toggle("map-names", z >= 10); };
-    map.on("zoomend", compact);
-    map.on("moveend", debounce(() => loadTowns(), 700));
     bindMapSearch();
-    await setCities(set); compact(); loadTowns();
+    await setCities(set);
   }
-  return { ensure, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); }, onCity() { if (ready) setCities(set); }, towns() { if (ready) loadTowns(true); } };
+  return {
+    ensure, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); },
+    onCity() { if (!ready) return; const c = state.city; cityMark.setLatLng([c.latitude, c.longitude]).setTooltipContent(c.name); setCities(set, false); }
+  };
 })();
 
 /* ---------- 15. SETTINGS UI ---------- */
@@ -1777,7 +1864,7 @@ function applySetting(k) {
     case "quality": Scene.setQuality(qualityFactor()); break;
     case "autoRefresh": scheduleRefresh(); break;
     case "mapBase": setMapBase(settings.mapBase); break;
-    case "mapTowns": MapsView.towns(); break;
+    case "mapTowns": setMapBase(settings.mapBase); break;
   }
 }
 function updateSoundBtn() {
@@ -1906,6 +1993,7 @@ function bindSearch() {
 const PAGES = ["home", "forecast", "radar", "maps", "news", "settings"];
 function show(page) {
   if (state.page === "radar" && page !== "radar") RadarView.stop();
+  if (page !== "radar" && page !== "maps") LiveLoc.stop();
   state.page = page; document.body.dataset.page = page;
   $$(".page").forEach(p => p.classList.toggle("is-active", p.id === "page-" + page));
   $$(".nav-item").forEach(n => { const on = n.dataset.page === page; n.classList.toggle("active", on); on ? n.setAttribute("aria-current", "page") : n.removeAttribute("aria-current"); });
