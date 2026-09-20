@@ -1302,23 +1302,28 @@ function loadLeaflet() {
   })();
   return loadLeaflet.p;
 }
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
 const BASES = {
-  dark: { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", opt: { subdomains: "abcd", maxZoom: 19, attribution: "© OpenStreetMap contributors © CARTO" } },
-  sat: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", opt: { maxZoom: 18, attribution: "Tiles © Esri" } },
-  terrain: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", opt: { subdomains: "abc", maxZoom: 17, attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap" } }
+  dark: { url: ESRI + "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", labels: ESRI + "Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", opt: { maxNativeZoom: 16, maxZoom: 19, attribution: "Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors" } },
+  sat: { url: ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}", labels: ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", opt: { maxNativeZoom: 17, maxZoom: 19, attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics" } },
+  terrain: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", opt: { subdomains: "abc", maxNativeZoom: 17, maxZoom: 19, attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap" } }
 };
 const baseLayer = key => { const b = BASES[key] || BASES.dark; return L.tileLayer(b.url, b.opt); };
-/* Base map with an automatic OpenStreetMap fallback if the chosen tile server is blocked */
+/* Base map (no API key needed) with an automatic OpenStreetMap fallback if tiles fail to load */
 function swapBase(map, key) {
-  if (map._base) map.removeLayer(map._base);
-  if (map._alt) { map.removeLayer(map._alt); map._alt = null; }
-  const layer = baseLayer(key); let ok = 0, bad = 0;
+  ["_base", "_alt", "_lbl"].forEach(k => { if (map[k]) { map.removeLayer(map[k]); map[k] = null; } });
+  const b = BASES[key] || BASES.dark, layer = baseLayer(key); let ok = 0, bad = 0;
   layer.on("tileload", () => { ok++; });
   layer.on("tileerror", () => {
     bad++;
-    if (!ok && bad >= 4 && !map._alt) { map._alt = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map); map._alt.bringToBack(); }
+    if (!ok && bad >= 4 && !map._alt) {
+      map._alt = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, className: key === "dark" ? "osm-dark" : "", attribution: "© OpenStreetMap contributors" }).addTo(map);
+      map._alt.bringToBack();
+      if (map._lbl) { map.removeLayer(map._lbl); map._lbl = null; }
+    }
   });
   layer.addTo(map); layer.bringToBack(); map._base = layer;
+  if (b.labels) map._lbl = L.tileLayer(b.labels, { maxNativeZoom: 16, maxZoom: 19, zIndex: 5 }).addTo(map);
 }
 const radarLayer = (f, opacity = 0) => {
   const l = L.tileLayer(Radar.url(f), { opacity, tileSize: 256, maxNativeZoom: 7, maxZoom: 12, zIndex: 400, className: "radar-tiles" });
@@ -1540,7 +1545,9 @@ const MapsView = (() => {
       map.flyTo([r.c.latitude, r.c.longitude], Math.max(map.getZoom(), 7));
       setTimeout(() => r.marker.fire("click"), 700);
     };
-    await setCities(set);
+    const compact = () => $("#worldMap").classList.toggle("map-compact", map.getZoom() <= 5);
+    map.on("zoomend", compact);
+    await setCities(set); compact();
   }
   return { ensure, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); }, onCity() { if (ready) setCities(set); } };
 })();

@@ -103,7 +103,7 @@ body:not([data-page="home"]) .scene-fade{background:rgba(3,9,26,.74)}
 .date-time strong{font-weight:500;color:var(--ink)}
 
 /* 6. HOME */
-.dashboard-grid{display:grid;height:100%;min-height:700px;gap:14px;grid-template-columns:minmax(0,1fr) 330px;grid-template-rows:auto minmax(0,1fr) 236px 48px;
+.dashboard-grid{display:grid;height:100%;gap:14px;grid-template-columns:minmax(0,1fr) 330px;grid-template-rows:auto auto 236px 48px;
   grid-template-areas:"hero hi" "hero aq" "fc radar" "news news"}
 .hero-weather{grid-area:hero;position:relative;display:flex;flex-direction:column;padding:26px 30px 22px;border-radius:var(--r-xl);border:1px solid var(--line);overflow:hidden;
   background:linear-gradient(90deg,rgba(3,8,26,.5),rgba(3,8,26,.12) 58%,rgba(3,8,26,0))}
@@ -397,6 +397,8 @@ body:not([data-page="home"]) .scene-fade{background:rgba(3,9,26,.74)}
 @keyframes eq{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
 
 /* 14. LEAFLET */
+.leaflet-container .osm-dark{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.7)}
+.map-compact .wx-pin{padding:0 8px}.map-compact .wx-pin .wi-wrap{display:none}
 .leaflet-container{background:#07142f;font-family:var(--font);outline:0}
 .leaflet-control-attribution{background:rgba(3,9,26,.7)!important;color:#7f97c2!important;font-size:10px!important}
 .leaflet-control-attribution a{color:#9db8e8!important}
@@ -407,6 +409,31 @@ body:not([data-page="home"]) .scene-fade{background:rgba(3,9,26,.74)}
 .mini-radar .leaflet-control-attribution{font-size:8px!important;padding:0 4px}
 .radar-fallback-msg{position:absolute;left:12px;right:12px;bottom:12px;z-index:3;padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.4;color:var(--ink-2);background:rgba(6,16,38,.88);border:1px solid var(--line)}
 .radar-fallback-msg:empty{display:none}
+
+/* Short laptop screens: tighter Home layout so nothing overlaps */
+@media (min-width:1001px) and (max-height:820px){
+  .main-content{padding-top:10px}
+  .topbar{padding-bottom:10px}
+  .dashboard-grid{gap:12px;grid-template-rows:auto auto 212px 44px}
+  .hero-weather{padding:18px 26px 16px}
+  .main-weather-content{margin-top:10px;gap:18px}
+  .main-weather-icon{width:88px;height:88px}
+  #temperature{font-size:clamp(72px,8vw,100px)}
+  .temperature-unit{font-size:clamp(40px,4vw,56px)}
+  .temperature-celsius{font-size:19px}
+  #weatherDescription{margin-top:8px;font-size:23px}
+  .feels-like{margin-top:6px;font-size:15px}
+  .weather-summary{margin-top:12px;font-size:13.5px}
+  .main-weather-details{margin-top:16px}
+  .main-detail{padding:11px 16px}
+  .highlights{padding:14px 20px 6px}
+  .highlight-row{padding:9px 0}
+  .air-quality{padding:12px 20px 12px}
+  .aqi-bar{margin:9px 0 7px}
+  .forecast-icon{width:34px;height:34px}
+  .forecast-section{padding:12px 14px 10px}
+  .section-title{padding-bottom:8px}
+}
 
 /* Lite mode: no blur, for slower devices */
 body.lite *{backdrop-filter:none!important}
