@@ -222,6 +222,7 @@
             </div>
             <div class="radar-map" id="radarMapWrap">
               <div id="miniRadar" class="mini-radar"></div>
+              <button type="button" class="mini-layer" id="miniBase" aria-label="Change map style"><svg class="i"><use href="#i-layers"/></svg><span>Dark</span></button>
               <div class="radar-fallback" id="radarFallback"><div class="radar-grid"></div><div class="radar-blobs"></div><p class="radar-fallback-msg" id="radarFallbackMsg"></p></div>
               <div class="radar-location"><svg class="i"><use href="#i-pin"/></svg><strong id="radarCity">Bahawalpur</strong></div>
               <div class="map-controls">
@@ -287,8 +288,8 @@
             <div class="panel"><h3>Rain outlook</h3><p class="muted" id="rainOutlookText">--</p><div class="chart small" id="rainOutlook"></div></div>
             <div class="panel">
               <h3>Map options</h3>
-              <div class="opt-row"><span>Base map</span>
-                <div class="seg" id="radarBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button></div></div>
+              <div class="opt-row wrap"><span>Map style (all maps)</span>
+                <div class="seg" id="radarBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button><button type="button" data-base="streets">Streets</button><button type="button" data-base="terrain">Terrain</button></div></div>
               <div class="opt-row"><span>Radar opacity</span><input class="range" id="radarOpacity" type="range" min="20" max="100" value="80" aria-label="Radar opacity"></div>
               <button class="pill-btn wide" id="radarCenter" type="button"><svg class="i"><use href="#i-target"/></svg><span>Centre on my city</span></button>
             </div>
@@ -299,10 +300,12 @@
       <!-- ================= MAPS ================= -->
       <section class="page" id="page-maps" data-title="Maps">
         <div class="page-head">
-          <div><h2>Weather Map</h2><p>Live temperatures across cities. Click anywhere on the map for its weather.</p></div>
+          <div><h2>Weather Map</h2><p>Live weather for cities, towns and villages. Zoom in to see smaller places, or click anywhere on the map.</p></div>
           <div class="head-actions">
+            <div class="map-search"><svg class="i"><use href="#i-search"/></svg><input id="mapSearch" type="text" placeholder="Find any town or village…" autocomplete="off" spellcheck="false" aria-label="Search a place on the map"><ul class="suggest-list" id="mapSuggest" hidden></ul></div>
             <div class="seg" id="mapSet"><button type="button" class="on" data-set="pk">Pakistan</button><button type="button" data-set="world">World</button><button type="button" data-set="saved">Saved</button></div>
-            <div class="seg" id="mapBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button><button type="button" data-base="terrain">Terrain</button></div>
+            <div class="seg" id="mapBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button><button type="button" data-base="streets">Streets</button><button type="button" data-base="terrain">Terrain</button></div>
+            <label class="switch-chip"><input type="checkbox" id="mapTowns" data-switch="mapTowns"><span>Nearby towns</span></label>
             <label class="switch-chip"><input type="checkbox" id="mapRadar"><span>Radar overlay</span></label>
           </div>
         </div>
@@ -364,6 +367,7 @@
             <div class="opt-row"><span>Sound volume</span><input class="range" type="range" min="0" max="1" step="0.05" data-range="soundVol" aria-label="Sound volume"></div>
             <div class="opt-row"><span>Scene</span><div class="seg" data-seg="sceneStyle"><button type="button" data-value="live">Live time</button><button type="button" data-value="golden">Golden hour</button></div></div>
             <div class="opt-row"><span>Animation</span><div class="seg" data-seg="motion"><button type="button" data-value="auto">Auto</button><button type="button" data-value="full">Full</button><button type="button" data-value="reduced">Calm</button><button type="button" data-value="off">Off</button></div></div>
+            <div class="opt-row"><span>Map style</span><div class="seg" data-seg="mapBase"><button type="button" data-value="dark">Dark</button><button type="button" data-value="sat">Satellite</button><button type="button" data-value="streets">Streets</button><button type="button" data-value="terrain">Terrain</button></div></div>
             <div class="opt-row"><span>Quality</span><div class="seg" data-seg="quality"><button type="button" data-value="high">High</button><button type="button" data-value="balanced">Balanced</button><button type="button" data-value="low">Light</button></div></div>
           </div>
 

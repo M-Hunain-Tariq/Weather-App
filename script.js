@@ -13,6 +13,8 @@ const API = {
   forecast: "https://api.open-meteo.com/v1/forecast",
   air: "https://air-quality-api.open-meteo.com/v1/air-quality",
   reverse: "https://nominatim.openstreetmap.org/reverse",
+  search: "https://nominatim.openstreetmap.org/search",
+  overpass: ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"],
   radar: "https://api.rainviewer.com/public/weather-maps.json"
 };
 
@@ -22,7 +24,8 @@ const DEFAULTS = {
   tempUnit: "c", windUnit: "kmh", pressureUnit: "hpa", clock: "12",
   voiceOn: true, voiceLang: "en", voiceName: "", voiceRate: 1, voicePitch: 1, autoSpeak: false,
   soundOn: false, soundVol: 0.5,
-  sceneStyle: "golden", motion: "auto", quality: "balanced", autoRefresh: "15"
+  sceneStyle: "live", motion: "auto", quality: "balanced", autoRefresh: "15",
+  mapBase: "dark", mapTowns: true, v: 2
 };
 
 const PK_CITIES = [
@@ -80,7 +83,9 @@ const store = {
   set(k, v) { try { localStorage.setItem("skywatch:" + k, JSON.stringify(v)); } catch { /* storage blocked */ } },
   del(k) { try { localStorage.removeItem("skywatch:" + k); } catch { /* ignore */ } }
 };
-let settings = Object.assign({}, DEFAULTS, store.get("settings", {}));
+const _stored = store.get("settings", {});
+if ((_stored.v || 1) < 2) _stored.sceneStyle = "live";      // v2: scene follows the real time of day
+let settings = Object.assign({}, DEFAULTS, _stored, { v: 2 });
 settings.autoRefresh = String(settings.autoRefresh);
 
 const state = {
@@ -123,6 +128,8 @@ function hm(h, m) {
 const hourLabel = h => settings.clock === "24" ? pad(h) + ":00" : `${h % 12 || 12} ${h >= 12 ? "PM" : "AM"}`;
 const isoHM = iso => { if (!iso) return "--"; const t = iso.split("T")[1] || "0:0"; const [h, m] = t.split(":").map(Number); return hm(h, m); };
 const cityNow = () => new Date(Date.now() + state.offset * 1000);
+const minOfDay = iso => { const t = (iso || "").split("T")[1] || "06:00"; const [h, m] = t.split(":").map(Number); return h * 60 + (m || 0); };
+const nowMinutes = () => { const n = cityNow(); return n.getUTCHours() * 60 + n.getUTCMinutes() + n.getUTCSeconds() / 60; };
 const isoDate = iso => new Date(iso.split("T")[0] + "T12:00:00Z");
 const dayShort = d => DAYS[d.getUTCDay()];
 const dateShort = d => `${pad(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}`;
@@ -157,6 +164,23 @@ function wxInfo(code, isDay = true) {
   if (!isDay && code === 0) { en = "Clear Night"; ur = "صاف رات"; ro = "saaf raat"; }
   if (!isDay && code === 1) { en = "Mostly Clear"; }
   return { code, kind, en, ur, ro, day: !!isDay };
+}
+
+/* A day's representative weather: rain only if it really rains for a few hours (not just one drizzly hour) */
+const PRECIP_KINDS = ["drizzle", "showers", "rain", "heavyrain", "snow", "storm"];
+const SEVERITY = { clear: 0, mostly: 1, partly: 2, cloudy: 3, fog: 4, drizzle: 5, showers: 6, rain: 7, snow: 8, heavyrain: 8, storm: 9 };
+function dayCode(i) {
+  const w = state.weather, h = w.hourly, d = w.daily, cur = w.current, kindOf = c => wxInfo(c, true).kind;
+  const from = i === 0 ? Math.max(7, cityNow().getUTCHours()) : 7, codes = [];
+  for (let k = i * 24 + from; k <= i * 24 + 19 && h.weather_code[k] != null; k++) codes.push(h.weather_code[k]);
+  if (i === 0 && PRECIP_KINDS.includes(kindOf(cur.weather_code))) return cur.weather_code;
+  const wet = codes.filter(c => PRECIP_KINDS.includes(kindOf(c)));
+  if (wet.length >= (i === 0 ? 2 : 3)) return wet.sort((a, b) => SEVERITY[kindOf(b)] - SEVERITY[kindOf(a)] || b - a)[0];
+  if (i === 0) return cur.weather_code;
+  const dry = codes.filter(c => !PRECIP_KINDS.includes(kindOf(c)));
+  if (!dry.length) return d.weather_code[i];
+  const cnt = {}; dry.forEach(c => { cnt[c] = (cnt[c] || 0) + 1; });
+  return Number(Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || b - a)[0]);
 }
 
 /* ---------- 6. WEATHER ICONS (animated inline SVG) ---------- */
@@ -196,7 +220,7 @@ const Scene = (() => {
   let W = 0, H = 0, DPR = 1, hy = 0, ox = 0, RW = 0;
   let raf = 0, lastT = 0, time = 0, running = false, slow = 0;
   let quality = 1, motion = 1;
-  const P = { night: 0, dusk: 0, ov: .2, cloud: .4, rain: 0, snow: 0, storm: 0, fog: 0, haze: 0, wind: 10, sunH: .35, sunX: .58, moonX: .5, moonH: .6, moonPhase: .3 };
+  const P = { night: 0, dusk: 0, ov: .2, cloud: .4, rain: 0, snow: 0, storm: 0, fog: 0, haze: 0, wind: 10, sunH: .35, sunX: .58, moonX: .5, moonH: .6, moonPhase: .3, heat: 0, leaves: 0, fire: 0 };
   const T = Object.assign({}, P);
   const api = { onThunder: null };
 
@@ -291,7 +315,7 @@ const Scene = (() => {
     stars = Array.from({ length: 150 }, () => ({ x: r(), y: r() * .92, r: r() * 1.3 + .3, p: r() * 6.28, s: .5 + r() * 1.5 }));
     sprites = [1, 2, 3, 4, 5].map(makeSprite);
     const rc = rng(77);
-    clouds = Array.from({ length: 12 }, (_, i) => ({ sp: sprites[i % 5], x: rc() * 1.3 - .15, y: .05 + rc() * .7, s: .45 + rc() * .85, v: .5 + rc(), thr: i / 12 * .95 }));
+    clouds = Array.from({ length: 12 }, (_, i) => ({ sp: sprites[i % 5], x: (i % 4 === 0) ? .2 + rc() * .5 : rc() * 1.3 - .15, y: .05 + rc() * .7, s: .45 + rc() * .85, v: .5 + rc(), thr: .04 + i / 12 * .9, track: i % 4 === 0, off: rc() - .5 }));
     clouds.sort((a, b) => a.s - b.s);
     fogSprite = document.createElement("canvas"); fogSprite.width = 600; fogSprite.height = 200;
     const f = fogSprite.getContext("2d"), gr = f.createRadialGradient(300, 100, 0, 300, 100, 300);
@@ -366,24 +390,39 @@ const Scene = (() => {
   function drawSun(c) {
     const vis = (1 - P.night) * (1 - P.ov * .92) * (1 - P.storm * .6) * (1 - P.fog * .88) * (1 - P.haze * .35);
     if (vis < .02) return;
-    const { x, y } = sunPos(), h = clamp(P.sunH, 0, 1), unit = Math.min(RW, H);
+    const { x, y } = sunPos(), h = clamp(P.sunH, 0, 1), unit = Math.min(RW, H), bright = smooth(.35, 1, h);
     const core = mixC([255, 132, 52], [255, 232, 160], smooth(0, .6, h));
     const R = unit * lerp(.62, .42, h), r = clamp(unit * .06, 34, 60) * lerp(1.15, .9, h);
     g.save(); g.globalCompositeOperation = "lighter";
     let gr = g.createRadialGradient(x, y, 0, x, y, R);
     gr.addColorStop(0, rgb(core, .42 * vis)); gr.addColorStop(.35, rgb(core, .13 * vis)); gr.addColorStop(1, rgb(core, 0));
     g.fillStyle = gr; g.fillRect(x - R, y - R, R * 2, R * 2);
+    if (bright > .05) {
+      const R2 = R * 1.5, bg = g.createRadialGradient(x, y, 0, x, y, R2);
+      bg.addColorStop(0, `rgba(255,248,220,${.24 * bright * vis})`); bg.addColorStop(1, "rgba(255,248,220,0)");
+      g.fillStyle = bg; g.fillRect(x - R2, y - R2, R2 * 2, R2 * 2);
+    }
     if (quality > .5 && P.ov < .4 && P.storm < .2) {
       g.translate(x, y); g.rotate(time * .03);
       const n = 12, L = R * 1.15;
       for (let i = 0; i < n; i++) {
         g.rotate(6.283 / n);
         const rg = g.createLinearGradient(0, 0, L, 0);
-        rg.addColorStop(0, rgb(core, .026 * vis)); rg.addColorStop(1, rgb(core, 0));
+        rg.addColorStop(0, rgb(core, (.026 + .035 * bright * (1 - P.ov)) * vis)); rg.addColorStop(1, rgb(core, 0));
         g.fillStyle = rg; g.beginPath(); g.moveTo(0, -r * .35); g.lineTo(L, -L * .05); g.lineTo(L, L * .05); g.lineTo(0, r * .35); g.closePath(); g.fill();
       }
     }
     g.restore();
+    if (quality > .5 && bright > .25 && P.ov < .35) {                     // lens flare on a bright, clear day
+      const cx = ox + RW * .5, cy = hy * .9;
+      g.save(); g.globalCompositeOperation = "lighter";
+      [[.32, 20, "255,214,140", .07], [.58, 12, "160,200,255", .06], [.86, 34, "255,180,120", .045], [1.15, 16, "200,255,220", .05]].forEach(([t, rr, col, al]) => {
+        const fx = x + (cx - x) * t, fy = y + (cy - y) * t, fg = g.createRadialGradient(fx, fy, 0, fx, fy, rr);
+        fg.addColorStop(0, `rgba(${col},${al * 2 * bright * vis})`); fg.addColorStop(.7, `rgba(${col},${al * bright * vis})`); fg.addColorStop(1, `rgba(${col},0)`);
+        g.fillStyle = fg; g.beginPath(); g.arc(fx, fy, rr, 0, 6.283); g.fill();
+      });
+      g.restore();
+    }
     gr = g.createRadialGradient(x, y, 0, x, y, r);
     gr.addColorStop(0, rgb([255, 250, 225], vis)); gr.addColorStop(.55, rgb(mixC(core, [255, 245, 210], .45), vis)); gr.addColorStop(1, rgb(core, vis * .9));
     g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
@@ -414,15 +453,17 @@ const Scene = (() => {
   function drawClouds(dt) {
     cg.setTransform(.5, 0, 0, .5, 0, 0); cg.globalCompositeOperation = "source-over"; cg.globalAlpha = 1;
     cg.clearRect(0, 0, W, H);
-    const sp = (4 + P.wind * .55) * motion * (1 + P.storm * .6);
+    const sp = (9 + P.wind * .7) * motion * (1 + P.storm * .6), sunY = sunPos().y;
+    const baseA = lerp(.7, .96, smooth(.15, .7, P.ov));           // thin & see-through when only a few clouds
     for (const cl of clouds) {
-      const vis = smooth(0, .22, P.cloud - cl.thr);
-      cl.x += sp * cl.v * dt / W;
-      const sc = cl.s * (1 + P.ov * .35), w = 520 * sc;
+      const vis = smooth(0, .2, P.cloud - cl.thr), sc = cl.s * (1 + P.ov * .35), w = 520 * sc;
+      cl.x += sp * cl.v * (.7 + sc * .5) * dt / W;
       if (cl.x * W > W + 40) cl.x = -w / W - .03;
       if (vis < .01) continue;
-      cg.globalAlpha = clamp(vis * (.6 + .4 * P.ov), 0, 1);
-      cg.drawImage(cl.sp, cl.x * W, cl.y * hy - 220 * sc * .7, w, 220 * sc);
+      cg.globalAlpha = clamp(vis * baseA, 0, 1);
+      const bob = Math.sin(time * .15 + cl.thr * 9) * 3;
+      const top = cl.track ? Math.min(sunY, hy * .82) - 220 * sc * .42 + cl.off * 70 : cl.y * hy - 220 * sc * .7;   // "track" clouds drift across the sun
+      cg.drawImage(cl.sp, cl.x * W, top + bob, w, 220 * sc);
     }
     cg.globalAlpha = 1; cg.globalCompositeOperation = "source-atop";
     let lit = mixC(mixC([255, 255, 255], [255, 176, 120], P.dusk), [60, 78, 126], P.night);
@@ -440,6 +481,13 @@ const Scene = (() => {
       const { x, y } = sunPos(), R = Math.min(RW, H) * .55;
       const rg = cg.createRadialGradient(x, y, 0, x, y, R);
       rg.addColorStop(0, `rgba(255,170,90,${.62 * P.dusk * sv})`); rg.addColorStop(1, "rgba(255,170,90,0)");
+      cg.fillStyle = rg; cg.fillRect(0, 0, W, H);
+    }
+    const dayLit = (1 - P.night) * (1 - P.dusk * .7) * (1 - P.storm);       // clouds glow where the sun shines through them
+    if (dayLit > .05) {
+      const { x, y } = sunPos(), R = Math.min(RW, H) * .42;
+      const rg = cg.createRadialGradient(x, y, 0, x, y, R);
+      rg.addColorStop(0, `rgba(255,252,230,${.75 * dayLit * (1 - P.ov * .6)})`); rg.addColorStop(1, "rgba(255,252,230,0)");
       cg.fillStyle = rg; cg.fillRect(0, 0, W, H);
     }
     if (P.night > .3) {
@@ -580,6 +628,48 @@ const Scene = (() => {
     if (flash > .01) { g.fillStyle = `rgba(200,222,255,${flash * .36})`; g.fillRect(0, 0, W, H); flash *= Math.exp(-dt * 7); }
   }
 
+  const birds = [], flies = [], leaves = [];
+  let nextBird = 6;
+  function updateLife(dt) {
+    const calm = motion > 0 && quality > .6 && P.night < .35 && P.rain < .05 && P.snow < .05 && P.storm < .05 && P.fog < .2 && P.ov < .55 && P.wind < 32;
+    if (calm) {
+      nextBird -= dt;
+      if (nextBird <= 0 && birds.length < 8) {
+        const dir = Math.random() < .5 ? 1 : -1, y0 = hy * (.16 + Math.random() * .28), n = 3 + Math.floor(Math.random() * 4);
+        for (let i = 0; i < n; i++) birds.push({ x: (dir > 0 ? -30 : W + 30) - dir * i * 26 + Math.random() * 10, y: y0 + Math.abs(i - n / 2) * 8 + Math.random() * 6, v: dir * (55 + Math.random() * 12), ph: Math.random() * 6, s: .8 + Math.random() * .5 });
+        nextBird = 28 + Math.random() * 30;
+      }
+    }
+    for (let i = birds.length - 1; i >= 0; i--) { const b = birds[i]; b.x += b.v * dt; b.y += Math.sin(time * .8 + b.ph) * 4 * dt; if (b.x < -80 || b.x > W + 80) birds.splice(i, 1); }
+    const wantF = Math.round(P.fire * 26 * quality * motion);
+    while (flies.length < wantF) flies.push({ x: Math.random() * W, y: hy - 10 + Math.random() * (H - hy) * .35, ph: Math.random() * 6, vx: (Math.random() - .5) * 14, vy: (Math.random() - .5) * 8 });
+    if (flies.length > wantF + 3) flies.length = wantF;
+    for (const f of flies) { f.x += (f.vx + Math.sin(time * .7 + f.ph) * 10) * dt; f.y += (f.vy + Math.cos(time * .9 + f.ph) * 8) * dt; if (f.x < -10) f.x = W + 10; if (f.x > W + 10) f.x = -10; f.y = clamp(f.y, hy - 40, H * .8); }
+    const wantL = Math.round(P.leaves * 14 * quality * motion), vx = 70 + P.wind * 7;
+    while (leaves.length < wantL) leaves.push({ x: -20 - Math.random() * W * .4, y: hy * (.4 + Math.random() * .6), r: 2 + Math.random() * 2.5, ph: Math.random() * 6, col: Math.random() < .5 ? "150,170,70" : "190,140,60" });
+    if (leaves.length > wantL + 2) leaves.length = wantL;
+    for (const l of leaves) { l.x += vx * dt * (.8 + l.r * .1); l.y += Math.sin(time * 3 + l.ph) * 30 * dt - 4 * dt; if (l.x > W + 20) { l.x = -20; l.y = hy * (.4 + Math.random() * .6); } }
+  }
+  function drawBirds() {
+    if (!birds.length) return;
+    g.strokeStyle = `rgba(20,24,40,${.55 * (1 - P.dusk * .3)})`; g.lineWidth = 1.4; g.lineCap = "round"; g.beginPath();
+    for (const b of birds) { const f = Math.sin(time * 9 + b.ph) * 4.5 * b.s, sx = b.s * 7; g.moveTo(b.x - sx, b.y - f); g.quadraticCurveTo(b.x - sx * .4, b.y - 2 * b.s, b.x, b.y); g.quadraticCurveTo(b.x + sx * .4, b.y - 2 * b.s, b.x + sx, b.y - f); }
+    g.stroke();
+  }
+  function drawLife() {
+    if (P.heat > .05 && P.night < .5) {
+      const a = P.heat * .12 * (1 - P.night) * (.8 + .2 * Math.sin(time * 1.3)), hg = g.createLinearGradient(0, hy - H * .16, 0, hy + 4);
+      hg.addColorStop(0, "rgba(255,170,80,0)"); hg.addColorStop(1, `rgba(255,170,80,${a})`); g.fillStyle = hg; g.fillRect(0, hy - H * .16, W, H * .16 + 4);
+      g.lineWidth = 1;
+      for (let i = 0; i < 4; i++) { g.strokeStyle = `rgba(255,225,170,${.05 * P.heat * (1 - P.night)})`; g.beginPath(); const y0 = hy - 8 - i * 11; for (let x = 0; x <= W; x += 24) { const y = y0 + Math.sin(x * .02 + time * 2 + i) * 2.2; x ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); }
+    }
+    if (flies.length) {
+      g.save(); g.globalCompositeOperation = "lighter";
+      for (const f of flies) { const a = .25 + .75 * Math.max(0, Math.sin(time * 2 + f.ph)), fg = g.createRadialGradient(f.x, f.y, 0, f.x, f.y, 7); fg.addColorStop(0, `rgba(210,255,120,${a})`); fg.addColorStop(1, "rgba(210,255,120,0)"); g.fillStyle = fg; g.fillRect(f.x - 7, f.y - 7, 14, 14); }
+      g.restore();
+    }
+    for (const l of leaves) { g.fillStyle = `rgba(${l.col},.75)`; g.save(); g.translate(l.x, l.y); g.rotate(time * 4 + l.ph); g.beginPath(); g.ellipse(0, 0, l.r * 1.6, l.r * .8, 0, 0, 6.283); g.fill(); g.restore(); }
+  }
   function step(dt) {
     const k = 1 - Math.exp(-dt * 1.8);
     for (const key in T) P[key] = lerp(P[key], T[key], k);
@@ -588,7 +678,7 @@ const Scene = (() => {
       if (!shoot) { nextShoot -= dt; if (nextShoot <= 0) { shoot = { x: ox + Math.random() * RW, y: Math.random() * hy * .4, vx: 500 + Math.random() * 300, vy: 220 + Math.random() * 120, life: .9 }; nextShoot = 10 + Math.random() * 14; } }
     }
     if (shoot) { shoot.x += shoot.vx * dt; shoot.y += shoot.vy * dt; shoot.life -= dt; if (shoot.life <= 0) shoot = null; }
-    tune();
+    tune(); updateLife(dt);
   }
   function draw(dt) {
     if (!W) return;
@@ -596,14 +686,14 @@ const Scene = (() => {
     const gr = g.createLinearGradient(0, 0, 0, hy);
     gr.addColorStop(0, rgb(c.top)); gr.addColorStop(.55, rgb(c.mid)); gr.addColorStop(1, rgb(c.hor));
     g.fillStyle = gr; g.fillRect(0, 0, W, hy + 2);
-    drawStars(); drawSun(c); drawMoon(); drawClouds(dt);
+    drawStars(); drawSun(c); drawMoon(); drawClouds(dt); drawBirds();
     const key = [P.night, P.dusk, P.ov, P.storm, P.haze, P.fog, P.snow].map(v => Math.round(v * 400)).join(",");
     if (key !== fgKey) {
       fgKey = key; g = fgG; fgG.setTransform(DPR, 0, 0, DPR, 0, 0); fgG.clearRect(0, 0, W, H);
       drawMountains(c, cols); drawLakeBase(c, cols); g = main;
     }
     g.drawImage(fgCv, 0, 0, W, H);
-    drawTrees(cols); drawWaterFx(); drawFog();
+    drawTrees(cols); drawWaterFx(); drawLife(); drawFog();
     if (drops.length) drawRain(dt);
     if (flakes.length) drawSnow(dt);
     if (dust.length) drawDust(dt);
@@ -625,7 +715,7 @@ const Scene = (() => {
   api.start = function () { if (running || motion === 0) return; running = true; lastT = performance.now(); raf = requestAnimationFrame(frame); };
   api.stop = function () { running = false; cancelAnimationFrame(raf); };
   api.set = function (o, instant) { Object.assign(T, o); if (instant) Object.assign(P, o); if (!running) { Object.assign(P, T); tune(); draw(0); } };
-  api.setMotion = function (m) { motion = m; if (m === 0) { api.stop(); Object.assign(P, T); drops.length = flakes.length = dust.length = 0; draw(0); } else api.start(); };
+  api.setMotion = function (m) { motion = m; if (m === 0) { api.stop(); Object.assign(P, T); drops.length = flakes.length = dust.length = birds.length = flies.length = leaves.length = 0; draw(0); } else api.start(); };
   api.setQuality = function (q) { quality = q; document.body.classList.toggle("lite", q < .6); layout(); };
   api.state = () => ({ P: Object.assign({}, P), T: Object.assign({}, T), drops: drops.length, flakes: flakes.length, W, H, hy, bolt: !!bolt, flash });
   api.forceStrike = strike;
@@ -633,7 +723,7 @@ const Scene = (() => {
 })();
 
 const SCENE_PRESET = {
-  clear: { cloud: .1, ov: 0 }, mostly: { cloud: .28, ov: .03 }, partly: { cloud: .55, ov: .12 }, cloudy: { cloud: .92, ov: .55 },
+  clear: { cloud: 0, ov: 0 }, mostly: { cloud: .28, ov: .03 }, partly: { cloud: .55, ov: .12 }, cloudy: { cloud: .92, ov: .55 },
   fog: { cloud: .5, ov: .35, fog: 1 }, drizzle: { cloud: .85, ov: .55, rain: .22 }, rain: { cloud: .95, ov: .7, rain: .6 },
   heavyrain: { cloud: 1, ov: .85, rain: 1 }, showers: { cloud: .8, ov: .45, rain: .5 }, storm: { cloud: 1, ov: .9, rain: .85, storm: 1 }, snow: { cloud: .9, ov: .6, snow: .85 }
 };
@@ -645,15 +735,16 @@ function sceneTargets() {
   const w = state.weather; if (!w) return null;
   const cur = w.current, d = w.daily, info = wxInfo(cur.weather_code, !!cur.is_day);
   const pre = SCENE_PRESET[info.kind] || SCENE_PRESET.clear;
-  const nowMs = cityNow().getTime();
-  let rise = Date.parse((d.sunrise?.[0] || "") + "Z"), set = Date.parse((d.sunset?.[0] || "") + "Z");
-  if (!isFinite(rise) || !isFinite(set)) { rise = nowMs - 6 * 36e5; set = nowMs + 6 * 36e5; }
+  const nowM = nowMinutes();                       // minutes since local midnight, so stale dates can never break the sky
+  let rise = minOfDay(d.sunrise?.[0]), set = minOfDay(d.sunset?.[0]);
+  if (!isFinite(rise) || !isFinite(set) || set <= rise) { rise = 360; set = 1080; }
   let dm, sunH, sunX, moonX = .5, moonH = .6;
-  const day = nowMs >= rise && nowMs <= set;
-  if (day) { dm = Math.min(nowMs - rise, set - nowMs) / 6e4; const p = (nowMs - rise) / (set - rise); sunH = Math.sin(p * Math.PI); sunX = lerp(.16, .86, p); }
-  else { dm = -Math.min(Math.abs(nowMs - rise), Math.abs(nowMs - set)) / 6e4; sunH = -.2; sunX = nowMs > set ? .86 : .16; }
-  if (!day) {
-    const t = nowMs > set ? (nowMs - set) / ((rise + 864e5) - set) : (nowMs - (set - 864e5)) / (rise - (set - 864e5));
+  const day = nowM >= rise && nowM <= set;
+  if (day) { dm = Math.min(nowM - rise, set - nowM); const pr = (nowM - rise) / (set - rise); sunH = Math.sin(pr * Math.PI); sunX = lerp(.16, .86, pr); }
+  else {
+    const toSet = nowM > set ? nowM - set : nowM + 1440 - set, toRise = nowM < rise ? rise - nowM : rise + 1440 - nowM;
+    dm = -Math.min(toSet, toRise); sunH = -.2; sunX = nowM > set ? .86 : .16;
+    const t = toSet / (toSet + toRise);
     moonX = lerp(.15, .85, clamp(t, 0, 1)); moonH = Math.sin(clamp(t, 0, 1) * Math.PI) * .8 + .1;
   }
   let night = clamp((-dm + 5) / 40, 0, 1), dusk = clamp(1 - Math.abs(dm - 10) / 60, 0, 1);
@@ -664,7 +755,14 @@ function sceneTargets() {
   const vis = cur.visibility ?? 20000;
   let haze = ["clear", "mostly", "partly", "cloudy"].includes(info.kind) ? clamp((8000 - vis) / 7000, 0, .8) : 0;
   const aqi = state.air?.current?.us_aqi; if (aqi > 150 && haze < .6) haze = Math.min(.8, haze + .25);
-  return { night, dusk, ov, cloud: lerp(pre.cloud, cover, .45), rain, snow: pre.snow || 0, storm: pre.storm || 0, fog: pre.fog || 0, haze, wind: cur.wind_speed_10m || 0, sunH, sunX, moonX, moonH, moonPhase: moonPhase() };
+  let cloud;                                     // clouds only appear when the weather really has clouds
+  if (info.kind === "clear") cloud = cover < .12 ? 0 : clamp((cover - .12) * .8, 0, .22);
+  else if (info.kind === "mostly") cloud = clamp(cover, .15, .38);
+  else if (info.kind === "partly") cloud = clamp(cover, .38, .68);
+  else cloud = lerp(pre.cloud, cover, .4);
+  const temp = cur.temperature_2m ?? 25, wind = cur.wind_speed_10m || 0, fogV = pre.fog || 0, snowV = pre.snow || 0, stormV = pre.storm || 0;
+  const fire = (night > .6 && temp >= 20 && !rain && ov < .6 && !fogV && !snowV) ? 1 : 0;
+  return { night, dusk, ov, cloud, rain, snow: snowV, storm: stormV, fog: fogV, haze, wind, sunH, sunX, moonX, moonH, moonPhase: moonPhase(), heat: clamp((temp - 33) / 9, 0, 1), leaves: snowV ? 0 : clamp((wind - 22) / 25, 0, 1), fire };
 }
 function updateScene(instant) {
   const t = sceneTargets(); if (!t) return;
@@ -828,7 +926,7 @@ function reportSentences(lang) {
   const city = lang === "ur" ? (state.cityUr || state.city.name) : state.city.name;
   const T = v => fmt.t(v), F = settings.tempUnit === "f", di = Math.round((c.wind_direction_10m || 0) / 45) % 8;
   const rc = d.precipitation_probability_max?.[0] ?? 0, uv = Math.round(d.uv_index_max?.[0] || 0), aqi = state.air?.current?.us_aqi;
-  const tm = d.weather_code?.[1] != null ? wxInfo(d.weather_code[1], true) : null;
+  const tm = d.time?.[1] ? wxInfo(dayCode(1), true) : null;
   const hum = Math.round(c.relative_humidity_2m), wn = windNum(c.wind_speed_10m), wu = S.wu[settings.windUnit];
   const hi = T(d.temperature_2m_max[0]), lo = T(d.temperature_2m_min[0]), fl = T(c.apparent_temperature);
   const hi2 = tm ? T(d.temperature_2m_max[1]) : "", lo2 = tm ? T(d.temperature_2m_min[1]) : "";
@@ -872,7 +970,7 @@ function forecastSentences(lang) {
   const nm = i => { const dt = isoDate(d.time[i]); return i === 0 ? (lang === "ur" ? "آج" : lang === "ro" ? "Aaj" : "Today") : i === 1 ? (lang === "ur" ? "کل" : lang === "ro" ? "Kal" : "Tomorrow") : lang === "en" ? DAYS_LONG[dt.getUTCDay()] : SPOKEN[lang].days[dt.getUTCDay()]; };
   s.push(lang === "ur" ? `${city} کا سات روزہ موسم۔` : lang === "ro" ? `${city} ka saat roza mausam.` : `Here is the seven day forecast for ${city}.`);
   for (let i = 0; i < d.time.length; i++) {
-    const info = wxInfo(d.weather_code[i], true), hi = fmt.t(d.temperature_2m_max[i]), lo = fmt.t(d.temperature_2m_min[i]), rc = d.precipitation_probability_max?.[i] ?? 0;
+    const info = wxInfo(dayCode(i), true), hi = fmt.t(d.temperature_2m_max[i]), lo = fmt.t(d.temperature_2m_min[i]), rc = d.precipitation_probability_max?.[i] ?? 0;
     if (lang === "ur") s.push(`${nm(i)}: ${info.ur}، زیادہ سے زیادہ ${hi} اور کم سے کم ${lo} ڈگری${rc >= 40 ? `، بارش کا امکان ${rc} فیصد` : ""}۔`);
     else if (lang === "ro") s.push(`${nm(i)}: ${info.ro}, zyada se zyada ${hi} aur kam se kam ${lo} degree${rc >= 40 ? `, barish ka imkaan ${rc} feesad` : ""}.`);
     else s.push(`${nm(i)}: ${info.en.toLowerCase()}, high ${hi}, low ${lo}${rc >= 40 ? `, ${rc} percent chance of rain` : ""}.`);
@@ -921,14 +1019,32 @@ function startVoiceSearch() {
 
 /* ---------- 10. API ---------- */
 const normLoc = r => ({ id: r.id, name: r.name, admin1: r.admin1 || "", country: r.country || "", latitude: r.latitude, longitude: r.longitude, timezone: r.timezone || "" });
-async function geocode(q, count = 5, lang = "en") {
-  const j = await getJSON(`${API.geo}?name=${encodeURIComponent(q)}&count=${count}&language=${lang}&format=json`);
-  return (j.results || []).map(normLoc);
+let lastOSM = 0;
+async function geocodeOSM(q, count) {                         // finds small towns & villages that GeoNames does not list
+  if (Date.now() - lastOSM < 1000) return [];
+  lastOSM = Date.now();
+  const j = await getJSON(`${API.search}?q=${encodeURIComponent(q)}&format=jsonv2&limit=${count}&addressdetails=1&accept-language=en`, { retries: 0, timeout: 8000 });
+  return (j || []).filter(r => r.lat && r.lon).map(r => {
+    const a = r.address || {};
+    const name = a.village || a.town || a.city || a.hamlet || a.suburb || a.municipality || r.name || (r.display_name || "").split(",")[0];
+    return { id: 0, name, admin1: a.state || a.county || "", country: a.country || "", latitude: +r.lat, longitude: +r.lon, timezone: "" };
+  });
+}
+async function geocode(q, count = 5, lang = "en", deep = false) {
+  let list = [];
+  try { const j = await getJSON(`${API.geo}?name=${encodeURIComponent(q)}&count=${count}&language=${lang}&format=json`); list = (j.results || []).map(normLoc); } catch { /* try OpenStreetMap below */ }
+  if (lang === "en" && (list.length === 0 || (deep && list.length < count))) {
+    try {
+      const seen = new Set(list.map(locKey));
+      (await geocodeOSM(q, count)).forEach(m => { if (!seen.has(locKey(m))) { seen.add(locKey(m)); list.push(m); } });
+    } catch { /* ignore */ }
+  }
+  return list.slice(0, count);
 }
 async function reverseGeo(lat, lon) {
-  const j = await getJSON(`${API.reverse}?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&accept-language=en`, { retries: 0, timeout: 8000 });
+  const j = await getJSON(`${API.reverse}?format=jsonv2&lat=${lat}&lon=${lon}&zoom=13&accept-language=en`, { retries: 0, timeout: 8000 });
   const a = j.address || {};
-  return { name: a.city || a.town || a.village || a.county || a.state_district || j.name || "Selected place", admin1: a.state || "", country: a.country || "" };
+  return { name: a.village || a.town || a.city || a.hamlet || a.suburb || a.municipality || a.county || a.state_district || j.name || "Selected place", admin1: a.state || "", country: a.country || "" };
 }
 function fetchWeather(lat, lon) {
   const cur = "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility";
@@ -1026,7 +1142,7 @@ function renderHighlights() {
 function renderForecastStrip() {
   const d = state.weather.daily;
   $("#forecastList").innerHTML = d.time.map((t, i) => {
-    const dt = isoDate(t), info = wxInfo(d.weather_code[i], true);
+    const dt = isoDate(t), info = wxInfo(dayCode(i), true);
     return `<button type="button" class="forecast-card${i === state.selectedDay ? " active" : ""}" data-i="${i}" aria-label="${DAYS_LONG[dt.getUTCDay()]}, ${info.en}">
       <span class="forecast-day">${dayShort(dt)}</span><span class="forecast-date">${dateShort(dt)}</span>
       <span class="forecast-icon">${wxIcon(info.kind, true)}</span>
@@ -1085,7 +1201,7 @@ function sunArc(i) {
   const pt = t => [(1 - t) ** 2 * P0[0] + 2 * (1 - t) * t * C[0] + t * t * P2[0], (1 - t) ** 2 * P0[1] + 2 * (1 - t) * t * C[1] + t * t * P2[1]];
   let marker = "";
   if (i === 0) {
-    const now = cityNow().getTime(), r = Date.parse(d.sunrise[0] + "Z"), s = Date.parse(d.sunset[0] + "Z");
+    const now = nowMinutes(), r = minOfDay(d.sunrise[0]), s = minOfDay(d.sunset[0]);
     if (now >= r && now <= s) { const p = pt((now - r) / (s - r)); marker = `<circle cx="${p[0]}" cy="${p[1]}" r="18" fill="#ffb300" opacity=".25"/><circle cx="${p[0]}" cy="${p[1]}" r="9" fill="url(#gSun)"/>`; }
   }
   const len = d.daylight_duration?.[i], txt = len ? `${Math.floor(len / 3600)}h ${Math.round(len % 3600 / 60)}m of daylight` : "";
@@ -1098,7 +1214,7 @@ function sunArc(i) {
 }
 function renderForecastPage() {
   const w = state.weather; if (!w) return;
-  const d = w.daily, i = clamp(state.selectedDay, 0, d.time.length - 1), dt = isoDate(d.time[i]), info = wxInfo(d.weather_code[i], true);
+  const d = w.daily, i = clamp(state.selectedDay, 0, d.time.length - 1), dt = isoDate(d.time[i]), info = wxInfo(dayCode(i), true);
   $("#fcSub").textContent = `${state.city.name} · tap a day to see the hour-by-hour breakdown`;
   const rc = d.precipitation_probability_max?.[i] ?? 0, uv = Math.round(d.uv_index_max?.[i] ?? 0);
   const stat = (ic, label, val) => `<div class="stat"><span>${icon(ic)}${label}</span><strong>${val}</strong></div>`;
@@ -1171,7 +1287,7 @@ function renderHourly() {
 function renderDays() {
   const d = state.weather.daily, mn = Math.min(...d.temperature_2m_min), mx = Math.max(...d.temperature_2m_max), span = mx - mn || 1;
   $("#fcDays").innerHTML = d.time.map((t, i) => {
-    const dt = isoDate(t), info = wxInfo(d.weather_code[i], true), rc = d.precipitation_probability_max?.[i] ?? 0;
+    const dt = isoDate(t), info = wxInfo(dayCode(i), true), rc = d.precipitation_probability_max?.[i] ?? 0;
     const l = (d.temperature_2m_min[i] - mn) / span * 100, wd = Math.max(10, (d.temperature_2m_max[i] - d.temperature_2m_min[i]) / span * 100);
     return `<button type="button" class="day-row${i === state.selectedDay ? " on" : ""}" data-i="${i}" aria-label="${DAYS_LONG[dt.getUTCDay()]}">
       <div><b>${i === 0 ? "Today" : dayShort(dt)}</b><small>${dateShort(dt)}</small></div><div class="wi-wrap">${wxIcon(info.kind, true)}</div>
@@ -1304,29 +1420,44 @@ function loadLeaflet() {
 }
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
 const BASES = {
-  dark: { url: ESRI + "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", labels: ESRI + "Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", opt: { maxNativeZoom: 16, maxZoom: 19, attribution: "Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors" } },
-  sat: { url: ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}", labels: ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", opt: { maxNativeZoom: 17, maxZoom: 19, attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics" } },
-  terrain: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", opt: { subdomains: "abc", maxNativeZoom: 17, maxZoom: 19, attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap" } }
+  dark: { name: "Dark", url: ESRI + "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", labels: ESRI + "Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", lz: 10, opt: { maxNativeZoom: 16, maxZoom: 19, attribution: "Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors" } },
+  sat: { name: "Satellite", url: ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}", labels: ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", lz: 13, opt: { maxNativeZoom: 17, maxZoom: 19, attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics" } },
+  streets: { name: "Streets", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", opt: { maxZoom: 19, attribution: "© OpenStreetMap contributors" } },
+  terrain: { name: "Terrain", url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", opt: { subdomains: "abc", maxNativeZoom: 17, maxZoom: 19, attribution: "© OpenStreetMap contributors, SRTM | © OpenTopoMap" } }
 };
 const baseLayer = key => { const b = BASES[key] || BASES.dark; return L.tileLayer(b.url, b.opt); };
-/* Base map (no API key needed) with an automatic OpenStreetMap fallback if tiles fail to load */
+function altBase(key) {
+  if (key === "streets") return L.tileLayer(ESRI + "World_Street_Map/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 17, maxZoom: 19, attribution: "Tiles © Esri" });
+  return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, className: key === "dark" ? "osm-dark" : "", attribution: "© OpenStreetMap contributors" });
+}
+/* Base map (no API key needed) with an automatic fallback if the tile server fails */
 function swapBase(map, key) {
   ["_base", "_alt", "_lbl"].forEach(k => { if (map[k]) { map.removeLayer(map[k]); map[k] = null; } });
   const b = BASES[key] || BASES.dark, layer = baseLayer(key); let ok = 0, bad = 0;
   layer.on("tileload", () => { ok++; });
   layer.on("tileerror", () => {
     bad++;
-    if (!ok && bad >= 4 && !map._alt) {
-      map._alt = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, className: key === "dark" ? "osm-dark" : "", attribution: "© OpenStreetMap contributors" }).addTo(map);
-      map._alt.bringToBack();
-      if (map._lbl) { map.removeLayer(map._lbl); map._lbl = null; }
-    }
+    if (!ok && bad >= 4 && !map._alt) { map._alt = altBase(key).addTo(map); map._alt.bringToBack(); if (map._lbl) { map.removeLayer(map._lbl); map._lbl = null; } }
   });
   layer.addTo(map); layer.bringToBack(); map._base = layer;
-  if (b.labels) map._lbl = L.tileLayer(b.labels, { maxNativeZoom: 16, maxZoom: 19, zIndex: 5 }).addTo(map);
+  if (b.labels) map._lbl = L.tileLayer(b.labels, { maxNativeZoom: b.lz || 13, maxZoom: 19, zIndex: 5 }).addTo(map);
+}
+/* One map style shared by every map in the app: choose Satellite once and all maps switch */
+const allMaps = [], BASE_ORDER = ["dark", "sat", "streets", "terrain"];
+function syncBaseUI() {
+  $$("#radarBase button, #mapBase button, [data-seg='mapBase'] button").forEach(b => b.classList.toggle("on", (b.dataset.base || b.dataset.value) === settings.mapBase));
+  const s = $("#miniBase span"); if (s) s.textContent = (BASES[settings.mapBase] || BASES.dark).name;
+}
+function registerMap(map) { allMaps.push(map); swapBase(map, settings.mapBase); }
+function setMapBase(key) {
+  if (!BASES[key]) key = "dark";
+  settings.mapBase = key; store.set("settings", settings);
+  allMaps.forEach(m => swapBase(m, key));
+  syncBaseUI();
+  if (key === "streets" && location.protocol === "file:") toast("The Streets map loads best when the app is opened through http or https (GitHub Pages or Live Server).");
 }
 const radarLayer = (f, opacity = 0) => {
-  const l = L.tileLayer(Radar.url(f), { opacity, tileSize: 256, maxNativeZoom: 7, maxZoom: 12, zIndex: 400, className: "radar-tiles" });
+  const l = L.tileLayer(Radar.url(f), { opacity, tileSize: 256, maxNativeZoom: 7, maxZoom: 18, zIndex: 400, className: "radar-tiles" });
   l.on("tileload", () => { Radar.ok++; });
   l.on("tileerror", () => { Radar.bad++; if (Radar.bad >= 8 && !Radar.ok && !Radar.warned) { Radar.warned = true; if (Radar.onFail) Radar.onFail(); } });
   return l;
@@ -1366,11 +1497,12 @@ const RadarMini = (() => {
   }
   async function init() {
     if (ready || starting) return; starting = true;
+    $("#miniBase").onclick = () => setMapBase(BASE_ORDER[(BASE_ORDER.indexOf(settings.mapBase) + 1) % BASE_ORDER.length]);
     if (!(await loadLeaflet())) { noMap("Map could not load. Check your internet connection and refresh."); setLive("#radarLive", false); starting = false; return; }
     const c = state.city || DEFAULT_CITY;
-    map = L.map("miniRadar", { zoomControl: false, scrollWheelZoom: false, minZoom: 3, maxZoom: 10 }).setView([c.latitude, c.longitude], 6);
+    map = L.map("miniRadar", { zoomControl: false, scrollWheelZoom: false, minZoom: 3, maxZoom: 18 }).setView([c.latitude, c.longitude], 6);
     if (map.attributionControl) map.attributionControl.setPrefix(false);
-    swapBase(map, "dark");
+    registerMap(map);
     Radar.onFail = () => { setLive("#radarLive", false, "No radar"); setLive("#radarLive2", false, "No radar"); const m = $("#radarMsg"); if (m) { m.hidden = false; m.textContent = "Radar tiles are unavailable right now, but the base map still works."; } };
     marker = cityDot([c.latitude, c.longitude]).addTo(map);
     ready = true; starting = false;
@@ -1418,8 +1550,8 @@ const RadarView = (() => {
     if (busy) return; busy = true;
     if (!(await loadLeaflet())) { msg("The map library could not be loaded. Please check your internet connection and reload the page."); busy = false; return; }
     const c = state.city || DEFAULT_CITY;
-    map = L.map("radarMap", { minZoom: 3, maxZoom: 10 }).setView([c.latitude, c.longitude], 6);
-    swapBase(map, "dark");
+    map = L.map("radarMap", { minZoom: 3, maxZoom: 18 }).setView([c.latitude, c.longitude], 6);
+    registerMap(map);
     marker = cityDot([c.latitude, c.longitude]).addTo(map).bindTooltip(c.name);
     ready = true; busy = false;
     setTimeout(() => map.invalidateSize(), 450);
@@ -1427,11 +1559,7 @@ const RadarView = (() => {
     $("#radarSlider").oninput = e => { play(false); show(Number(e.target.value)); };
     $("#radarOpacity").oninput = e => { opacity = e.target.value / 100; layers[idx]?.setOpacity(opacity); };
     $("#radarCenter").onclick = () => { const s = state.city; map.flyTo([s.latitude, s.longitude], 6); };
-    $("#radarBase").onclick = e => {
-      const b = e.target.closest("button"); if (!b) return;
-      $$("#radarBase button").forEach(x => x.classList.toggle("on", x === b));
-      swapBase(map, b.dataset.base);
-    };
+    $("#radarBase").onclick = e => { const b = e.target.closest("button"); if (b) setMapBase(b.dataset.base); };
     await load(false);
     setInterval(() => { if (state.page === "radar" && !document.hidden) load(true); }, 5 * 6e4);
   }
@@ -1472,12 +1600,12 @@ const MapsView = (() => {
     $("button", el).addEventListener("click", () => { map.closePopup(); loadCity(loc); location.hash = "#/home"; });
     return el;
   }
-  async function pointWeather(ll) {
+  async function pointWeather(ll, known) {
     const pop = L.popup().setLatLng(ll).setContent('<div class="map-pop"><p>Loading weather…</p></div>').openOn(map);
     try {
       const [w, rev] = await Promise.all([
         getJSON(`${API.forecast}?latitude=${ll.lat.toFixed(3)}&longitude=${ll.lng.toFixed(3)}&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&timezone=auto`),
-        reverseGeo(ll.lat, ll.lng).catch(() => null)
+        known ? Promise.resolve(known) : reverseGeo(ll.lat, ll.lng).catch(() => null)
       ]);
       const name = rev?.name || `${ll.lat.toFixed(2)}, ${ll.lng.toFixed(2)}`;
       pop.setContent(popupEl(name, w.current, { name, admin1: rev?.admin1 || "", country: rev?.country || "", latitude: ll.lat, longitude: ll.lng, timezone: w.timezone }));
@@ -1520,21 +1648,79 @@ const MapsView = (() => {
       msg(""); render(list, d.arr); fit(list);
     } catch { msg("Could not load city temperatures. Please check your connection and try again."); }
   }
+  /* Nearby towns & villages (from OpenStreetMap) with live weather, so even small places show up */
+  let townMarks = [], townBusy = false, townKey = "", townTok = 0;
+  const clearTowns = () => { townMarks.forEach(m => map.removeLayer(m)); townMarks = []; };
+  async function fetchPlaces(b) {
+    const bb = `${b.getSouth().toFixed(4)},${b.getWest().toFixed(4)},${b.getNorth().toFixed(4)},${b.getEast().toFixed(4)}`;
+    const q = `[out:json][timeout:15];(node["place"~"^(city|town)$"](${bb});node["place"="village"](${bb}););out 220;`;
+    for (const u of API.overpass) { try { const j = await getJSON(`${u}?data=${encodeURIComponent(q)}`, { retries: 0, timeout: 16000 }); return j.elements || []; } catch { /* next mirror */ } }
+    return [];
+  }
+  async function loadTowns(force) {
+    if (!map) return;
+    const z = map.getZoom();
+    if (!settings.mapTowns || z < 9) { clearTowns(); townKey = ""; return; }
+    const b = map.getBounds(), key = [z, b.getSouth().toFixed(1), b.getWest().toFixed(1)].join();
+    if (townBusy || (!force && key === townKey)) return;
+    townBusy = true; townKey = key; const tok = ++townTok;
+    try {
+      const rank = { city: 0, town: 1, village: 2 };
+      let places = (await fetchPlaces(b)).map(p => ({ name: p.tags["name:en"] || p.tags.name, type: p.tags.place, pop: +p.tags.population || 0, latitude: p.lat, longitude: p.lon })).filter(p => p.name);
+      places.sort((x, y) => rank[x.type] - rank[y.type] || y.pop - x.pop);
+      const cityPts = rows.map(r => r.c);
+      places = places.filter(p => !cityPts.some(c => Math.abs(c.latitude - p.latitude) < .05 && Math.abs(c.longitude - p.longitude) < .05)).slice(0, z >= 11 ? 45 : z >= 10 ? 36 : 26);
+      if (!places.length || tok !== townTok) return;
+      const j = await getJSON(`${API.forecast}?latitude=${places.map(p => p.latitude.toFixed(3)).join(",")}&longitude=${places.map(p => p.longitude.toFixed(3)).join(",")}&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&timezone=auto`);
+      const arr = Array.isArray(j) ? j : [j];
+      if (tok !== townTok) return;
+      clearTowns();
+      places.forEach((p, i) => {
+        const cur = arr[i]?.current; if (!cur) return;
+        const info = wxInfo(cur.weather_code, !!cur.is_day);
+        const m = L.marker([p.latitude, p.longitude], { icon: L.divIcon({ className: "wx-marker", iconSize: [0, 0], html: `<div class="wx-pin town">${wxIcon(info.kind, !!cur.is_day)}<span>${fmt.tu(cur.temperature_2m)}</span><small>${esc(p.name)}</small></div>` }) }).addTo(map);
+        m.on("click", e => { L.DomEvent.stopPropagation(e); L.popup().setLatLng([p.latitude, p.longitude]).setContent(popupEl(p.name, cur, { name: p.name, admin1: "", country: "", latitude: p.latitude, longitude: p.longitude, timezone: "" })).openOn(map); });
+        townMarks.push(m);
+      });
+    } catch { /* keep the map usable if the towns service is busy */ }
+    finally { townBusy = false; if (map) loadTowns(); }
+  }
+  function goTo(s) {
+    map.flyTo([s.latitude, s.longitude], 12, { duration: 1.2 });
+    setTimeout(() => pointWeather({ lat: s.latitude, lng: s.longitude }, s), 1300);
+  }
+  function bindMapSearch() {
+    const input = $("#mapSearch"), ul = $("#mapSuggest"); let sugg = [], tok = 0;
+    const hide = () => { ul.hidden = true; };
+    input.addEventListener("input", debounce(async () => {
+      const q = input.value.trim(), my = ++tok;
+      if (q.length < 2) { hide(); return; }
+      try {
+        const r = await geocode(q, 6); if (my !== tok) return; sugg = r;
+        ul.innerHTML = r.length ? r.map((s, i) => `<li data-i="${i}">${icon("pin")}<div>${esc(s.name)}<small>${esc([s.admin1, s.country].filter(Boolean).join(", "))}</small></div></li>`).join("") : '<li class="suggest-empty">No places found</li>';
+        ul.hidden = false;
+      } catch { /* ignore while typing */ }
+    }, 300));
+    ul.addEventListener("click", e => { const li = e.target.closest("li[data-i]"); if (!li) return; const s = sugg[Number(li.dataset.i)]; hide(); input.value = s.name; goTo(s); });
+    input.addEventListener("keydown", async e => {
+      if (e.key !== "Enter") return; e.preventDefault();
+      const q = input.value.trim(); if (!q) return;
+      const r = await geocode(q, 1, "en", true).catch(() => []);
+      if (r[0]) { hide(); goTo(r[0]); } else toast("Place not found. Try another spelling.");
+    });
+    document.addEventListener("click", e => { if (!e.target.closest(".map-search")) hide(); });
+  }
   async function ensure() {
     if (ready) { map.invalidateSize(); return; }
     if (busy) return; busy = true;
     if (!(await loadLeaflet())) { msg("The map library could not be loaded. Please check your internet connection and reload the page."); busy = false; return; }
-    map = L.map("worldMap", { minZoom: 2, maxZoom: 12, worldCopyJump: true }).setView([30, 70], 5);
-    swapBase(map, "dark");
+    map = L.map("worldMap", { minZoom: 2, maxZoom: 18, worldCopyJump: true }).setView([30, 70], 5);
+    registerMap(map);
     map.on("click", e => pointWeather(e.latlng));
     ready = true; busy = false;
     setTimeout(() => map.invalidateSize(), 450);
     $("#mapSet").onclick = e => { const b = e.target.closest("button"); if (b) setCities(b.dataset.set); };
-    $("#mapBase").onclick = e => {
-      const b = e.target.closest("button"); if (!b) return;
-      $$("#mapBase button").forEach(x => x.classList.toggle("on", x === b));
-      swapBase(map, b.dataset.base);
-    };
+    $("#mapBase").onclick = e => { const b = e.target.closest("button"); if (b) setMapBase(b.dataset.base); };
     $("#mapRadar").onchange = async e => {
       if (radarL) { map.removeLayer(radarL); radarL = null; }
       if (e.target.checked) { try { const d = await Radar.load(); radarL = radarLayer(d.frames[Math.max(0, d.past - 1)], .7).addTo(map); } catch { toast("Live radar is unavailable right now."); e.target.checked = false; } }
@@ -1545,11 +1731,13 @@ const MapsView = (() => {
       map.flyTo([r.c.latitude, r.c.longitude], Math.max(map.getZoom(), 7));
       setTimeout(() => r.marker.fire("click"), 700);
     };
-    const compact = () => $("#worldMap").classList.toggle("map-compact", map.getZoom() <= 5);
+    const compact = () => { const z = map.getZoom(); $("#worldMap").classList.toggle("map-compact", z <= 5); $("#worldMap").classList.toggle("map-names", z >= 10); };
     map.on("zoomend", compact);
-    await setCities(set); compact();
+    map.on("moveend", debounce(() => loadTowns(), 700));
+    bindMapSearch();
+    await setCities(set); compact(); loadTowns();
   }
-  return { ensure, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); }, onCity() { if (ready) setCities(set); } };
+  return { ensure, invalidate() { if (ready) setTimeout(() => map.invalidateSize(), 60); }, onCity() { if (ready) setCities(set); }, towns() { if (ready) loadTowns(true); } };
 })();
 
 /* ---------- 15. SETTINGS UI ---------- */
@@ -1576,6 +1764,8 @@ function applySetting(k) {
     case "motion": Scene.setMotion(motionFactor()); break;
     case "quality": Scene.setQuality(qualityFactor()); break;
     case "autoRefresh": scheduleRefresh(); break;
+    case "mapBase": setMapBase(settings.mapBase); break;
+    case "mapTowns": MapsView.towns(); break;
   }
 }
 function updateSoundBtn() {
@@ -1647,7 +1837,7 @@ async function chooseLocation(loc) {
 }
 async function searchCity(q) {
   try {
-    const r = await geocode(q, 1);
+    const r = await geocode(q, 1, "en", true);
     if (!r.length) { showError(`Could not find “${q}”. Check the spelling or try adding the country.`); return; }
     await chooseLocation(r[0]);
   } catch (e) { showError(errText(e)); }
@@ -1757,7 +1947,7 @@ function bindEvents() {
 async function init() {
   $("#brandIcon").innerHTML = wxIcon("partly", true);
   Scene.init(); Scene.setMotion(motionFactor()); Scene.setQuality(qualityFactor());
-  bindSettings(); bindSearch(); bindEvents(); renderSaved(); renderLocMenu(); updateSoundBtn(); fillVoiceSelect();
+  bindSettings(); bindSearch(); bindEvents(); renderSaved(); renderLocMenu(); updateSoundBtn(); fillVoiceSelect(); syncBaseUI();
   tickClock(); setInterval(tickClock, 1000);
   route();
   RadarMini.init();
