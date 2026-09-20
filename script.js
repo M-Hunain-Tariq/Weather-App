@@ -1101,7 +1101,7 @@ async function loadCity(loc, { silent = false, speak = false } = {}) {
   }
 }
 function renderAll(first) {
-  renderHero(); renderHighlights(); renderForecastStrip(); renderAir(); renderForecastPage(); rebuildNews(); renderUpdated();
+  renderHero(); renderHighlights(); renderHomeHourly(); renderAir(); renderForecastPage(); rebuildNews(); renderUpdated();
   updateScene(first);
 }
 function countTo(el, to, dur = 700) {
@@ -1139,16 +1139,27 @@ function renderHighlights() {
   const uv = Math.round(d.uv_index_max[0] ?? 0); $("#uvIndex").textContent = `${uv} (${uvLevel(uv)})`;
   $("#rainChance").textContent = (d.precipitation_probability_max?.[0] ?? 0) + "%";
 }
-function renderForecastStrip() {
-  const d = state.weather.daily;
-  $("#forecastList").innerHTML = d.time.map((t, i) => {
-    const dt = isoDate(t), info = wxInfo(dayCode(i), true);
-    return `<button type="button" class="forecast-card${i === state.selectedDay ? " active" : ""}" data-i="${i}" aria-label="${DAYS_LONG[dt.getUTCDay()]}, ${info.en}">
-      <span class="forecast-day">${dayShort(dt)}</span><span class="forecast-date">${dateShort(dt)}</span>
-      <span class="forecast-icon">${wxIcon(info.kind, true)}</span>
-      <span class="forecast-temperature"><strong>${fmt.tu(d.temperature_2m_max[i])}</strong> <span>/ ${fmt.tu(d.temperature_2m_min[i])}</span></span>
-      <p>${info.en}</p></button>`;
-  }).join("");
+/* Home: the next 12 hours, starting with the current hour. When the hour changes, the passed hour leaves and a new one is added. */
+let lastHourShown = -1;
+const SHORT_COND = { "Thunderstorms": "Storms", "Thunderstorm with Hail": "Hail storm", "Severe Thunderstorm": "Severe storm", "Freezing Drizzle": "Icy drizzle", "Heavy Freezing Rain": "Icy rain", "Violent Showers": "Showers", "Heavy Snow Showers": "Snow showers", "Snow Grains": "Snow", "Heavy Drizzle": "Drizzle" };
+function hourIndexNow() {
+  const h = state.weather.hourly, n = cityNow();
+  const key = `${n.getUTCFullYear()}-${pad(n.getUTCMonth() + 1)}-${pad(n.getUTCDate())}T${pad(n.getUTCHours())}:00`;
+  const k = h.time.indexOf(key);
+  return k >= 0 ? k : clamp(n.getUTCHours(), 0, h.time.length - 1);
+}
+function renderHomeHourly(animate) {
+  const w = state.weather; if (!w) return;
+  const h = w.hourly, c = w.current, k0 = hourIndexNow(), out = [];
+  lastHourShown = cityNow().getUTCHours();
+  for (let i = 0; i < 12 && h.time[k0 + i] != null; i++) {
+    const k = k0 + i, hr = Number(h.time[k].slice(11, 13)), now = i === 0;
+    const code = now ? c.weather_code : h.weather_code[k], day = now ? !!c.is_day : !!h.is_day[k], temp = now ? c.temperature_2m : h.temperature_2m[k];
+    const info = wxInfo(code, day), rp = h.precipitation_probability[k] ?? 0;
+    out.push(`<div class="hour-card${now ? " now" : ""}"><span class="hc-time">${now ? "Now" : hourLabel(hr)}</span><span class="hc-icon">${wxIcon(info.kind, day)}</span><strong class="hc-temp">${fmt.tu(temp)}</strong><span class="hc-cond">${SHORT_COND[info.en] || info.en}</span><span class="hc-rain">${rp >= 20 ? rp + "% rain" : "&nbsp;"}</span></div>`);
+  }
+  const list = $("#hourlyList"); list.innerHTML = out.join("");
+  if (animate) { list.classList.remove("slide"); void list.offsetWidth; list.classList.add("slide"); }
 }
 const AQI_STOPS = [[0, 0], [50, 20], [100, 40], [150, 60], [200, 78], [300, 94], [500, 100]];
 function aqiPos(a) {
@@ -1178,6 +1189,7 @@ function tickClock() {
   $("#currentTime").textContent = hm(n.getUTCHours(), n.getUTCMinutes());
   tickClock.n = (tickClock.n || 0) + 1;
   if (tickClock.n % 30 === 0 && state.weather) updateScene();
+  if (state.weather && lastHourShown !== n.getUTCHours()) renderHomeHourly(true);
 }
 let refreshTimer;
 function scheduleRefresh() {
@@ -1194,7 +1206,7 @@ const windSuffix = () => ({ kmh: "km/h", mph: "mph", ms: "m/s" }[settings.windUn
 
 function selectDay(i) {
   state.selectedDay = clamp(i, 0, 6);
-  renderForecastStrip(); renderForecastPage();
+  renderForecastPage();
 }
 function sunArc(i) {
   const d = state.weather.daily, P0 = [30, 84], C = [300, -52], P2 = [570, 84];
@@ -1756,7 +1768,7 @@ function applySetting(k) {
   switch (k) {
     case "tempUnit": case "windUnit": case "pressureUnit": case "clock":
       tickClock();
-      if (state.weather) { renderHero(); renderHighlights(); renderForecastStrip(); renderForecastPage(); rebuildNews(); renderRainOutlook(); MapsView.onCity(); }
+      if (state.weather) { renderHero(); renderHighlights(); renderHomeHourly(); renderForecastPage(); rebuildNews(); renderRainOutlook(); MapsView.onCity(); }
       break;
     case "voiceLang": fillVoiceSelect(); break;
     case "soundOn": case "soundVol": Ambience.update(); updateSoundBtn(); break;
@@ -1923,7 +1935,6 @@ function bindEvents() {
   $("#soundBtn").onclick = toggleSound;
   $("#voiceStop").onclick = () => Voice.stop();
   $("#micBtn").onclick = startVoiceSearch;
-  $("#forecastList").addEventListener("click", e => { const c = e.target.closest(".forecast-card"); if (!c) return; selectDay(Number(c.dataset.i)); location.hash = "#/forecast"; });
   $("#fcDays").addEventListener("click", e => { const r = e.target.closest(".day-row"); if (r) selectDay(Number(r.dataset.i)); });
   $("#fcMetric").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.fcMetric = b.dataset.metric; $$("#fcMetric button").forEach(x => x.classList.toggle("on", x === b)); renderChart(); });
   $("#fcSpeak").onclick = () => speakSentences(forecastSentences, `7-day forecast for ${state.city?.name || ""}`);
