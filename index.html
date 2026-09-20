@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="SkyWatch - live weather, radar, maps, news and voice reports">
+<meta name="theme-color" content="#030a1f">
+<title>SkyWatch — Weather Dashboard</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Dancing+Script:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="home">
+
+<!-- Weather gradients used by every weather icon -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gSun" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff3ae"/><stop offset=".55" stop-color="#ffc636"/><stop offset="1" stop-color="#ff8c1a"/></linearGradient>
+    <linearGradient id="gCloud" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#b4c9f0"/></linearGradient>
+    <linearGradient id="gCloudDark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8b5d0"/><stop offset="1" stop-color="#5a6a8c"/></linearGradient>
+    <linearGradient id="gMoon" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fffbe6"/><stop offset="1" stop-color="#b9c4ec"/></linearGradient>
+    <linearGradient id="gDrop" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fdcff"/><stop offset="1" stop-color="#2f86ff"/></linearGradient>
+    <linearGradient id="gBolt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff7a8"/><stop offset="1" stop-color="#ffab00"/></linearGradient>
+  </defs>
+</svg>
+
+<!-- UI icon sprite -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h4.5v-6h4v6h4.5V10"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01"/></symbol>
+  <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.1"/><path d="M12 12 19 6"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4z"/><path d="M9 4v14M15 6v14"/></symbol>
+  <symbol id="i-news" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" stroke-width="3" stroke-dasharray="3.14 3.14"/><circle cx="12" cy="12" r="6.2"/><circle cx="12" cy="12" r="2.4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11A6.5 6.5 0 0 1 18.5 10c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></symbol>
+  <symbol id="i-chevdown" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3.5s6 6.2 6 10.6a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z"/></symbol>
+  <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8.5h10.5a2.7 2.7 0 1 0-2.7-2.7M3 12h15a2.7 2.7 0 1 1-2.7 2.7M3 15.5h7"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 12.5 15.2 8.8"/><path d="M7.6 15.4a5.6 5.6 0 0 1 0-6.8M16.4 15.4a5.6 5.6 0 0 0 0-6.8"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M10 14.5V5a2 2 0 1 1 4 0v9.5a4 4 0 1 1-4 0z"/><path d="M12 9v7"/></symbol>
+  <symbol id="i-sunrise" viewBox="0 0 24 24"><path d="M3 19h18M7 19a5 5 0 0 1 10 0M12 7v4M4.9 12.2l1.7 1.3M19.1 12.2l-1.7 1.3M9.3 8.6 12 6l2.7 2.6"/></symbol>
+  <symbol id="i-sunset" viewBox="0 0 24 24"><path d="M3 19h18M7 19a5 5 0 0 1 10 0M12 6v4M4.9 12.2l1.7 1.3M19.1 12.2l-1.7 1.3M9.3 7.6 12 10.2l2.7-2.6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></symbol>
+  <symbol id="i-rain" viewBox="0 0 24 24"><path d="M7 15.5a4 4 0 0 1-.5-7.9A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 0 1 .5 7"/><path d="M8.5 18.5l-1 2M12.5 18.5l-1 2M16.5 18.5l-1 2"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M5 19C5 10 10 5 20 4c0 10-5 15-14 15z"/><path d="M5 19c3-5 6-8 10-10"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.6 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8L3.6 9.7l5.8-.8L12 3.6z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5.5v13M15.5 5.5v13"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4L12 4zM12 10v4.5M12 17.3v.1"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10A4.5 4.5 0 0 1 12 7.2 4.5 4.5 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/></symbol>
+  <symbol id="i-car" viewBox="0 0 24 24"><path d="M4 15v-3l2-5h12l2 5v3M4 15h16M4 15v3M20 15v3"/><circle cx="8" cy="15" r=".8"/><circle cx="16" cy="15" r=".8"/></symbol>
+  <symbol id="i-sprout" viewBox="0 0 24 24"><path d="M12 21v-9"/><path d="M12 12c0-4 2.5-6 7-6 0 4-2.5 6-7 6zM12 15c0-3-2-5-6-5 0 3.5 2 5 6 5z"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2.5 4.5 14H11l-1 7.5L19.5 10H13l0-7.5z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></symbol>
+</svg>
+
+<!-- Live weather scene (sky, sun/moon, clouds, mountains, lake, rain, snow, lightning) -->
+<canvas id="sceneCanvas" aria-hidden="true"></canvas>
+<div class="scene-fade" aria-hidden="true"></div>
+
+<div class="app-shell">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#/home" aria-label="SkyWatch home">
+      <div class="brand-icon" id="brandIcon"></div>
+      <div class="brand-text">
+        <h1>SkyWatch</h1>
+        <p>Your Weather, Our Priority</p>
+      </div>
+    </a>
+
+    <nav class="sidebar-navigation" aria-label="Main navigation">
+      <a class="nav-item active" href="#/home" data-page="home"><svg class="i"><use href="#i-home"/></svg><span>Home</span></a>
+      <a class="nav-item" href="#/forecast" data-page="forecast"><svg class="i"><use href="#i-calendar"/></svg><span>7-Day Forecast</span></a>
+      <a class="nav-item" href="#/radar" data-page="radar"><svg class="i"><use href="#i-radar"/></svg><span>Radar</span></a>
+      <a class="nav-item" href="#/maps" data-page="maps"><svg class="i"><use href="#i-map"/></svg><span>Maps</span></a>
+      <a class="nav-item" href="#/news" data-page="news"><svg class="i"><use href="#i-news"/></svg><span>News</span><em class="nav-dot" id="newsDot" hidden></em></a>
+      <a class="nav-item" href="#/settings" data-page="settings"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></a>
+    </nav>
+
+    <div class="sidebar-art" aria-hidden="true">
+      <svg viewBox="0 0 220 210" preserveAspectRatio="xMidYMax slice">
+        <defs>
+          <linearGradient id="artSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1247" stop-opacity="0"/><stop offset=".6" stop-color="#5a2d86" stop-opacity=".55"/><stop offset="1" stop-color="#e2688a" stop-opacity=".55"/></linearGradient>
+        </defs>
+        <rect width="220" height="210" fill="url(#artSky)"/>
+        <path d="M0 210V120l28-30 22 26 30-46 34 50 26-24 38 44 42-38v108z" fill="#2b2360" opacity=".85"/>
+        <path d="M0 210V150l30-36 26 30 34-44 40 52 30-28 60 46v40z" fill="#150f38"/>
+        <path d="M0 210v-38l20-22 14 16 22-30 26 40 20-18 28 26 30-28 60 36v18z" fill="#080622"/>
+      </svg>
+      <div class="sidebar-quote"><span>Better</span><span>Forecasts</span><span>Brighter</span><span>Days ♡</span></div>
+    </div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- ===================== MAIN ===================== -->
+  <main class="main-content">
+
+    <header class="topbar">
+      <button class="icon-btn mobile-menu-button" id="mobileMenuButton" type="button" aria-label="Open menu"><svg class="i"><use href="#i-menu"/></svg></button>
+
+      <form class="weather-search" id="weatherForm" autocomplete="off" role="search">
+        <svg class="i search-icon"><use href="#i-search"/></svg>
+        <input id="cityInput" name="city" type="text" placeholder="Search city..." aria-label="Search city" aria-controls="suggestList" autocomplete="off" spellcheck="false">
+        <button type="button" class="icon-btn mic-btn" id="micBtn" aria-label="Search by voice" title="Say a city name"><svg class="i"><use href="#i-mic"/></svg></button>
+        <ul class="suggest-list" id="suggestList" role="listbox" hidden></ul>
+      </form>
+
+      <div class="topbar-right">
+        <div class="loc-wrap">
+          <button class="topbar-location" id="locBtn" type="button" aria-haspopup="true" aria-expanded="false">
+            <svg class="i location-target-icon"><use href="#i-target"/></svg>
+            <span id="topbarCity">Bahawalpur</span>
+            <svg class="i location-arrow"><use href="#i-chevdown"/></svg>
+          </button>
+          <div class="loc-menu" id="locMenu" hidden></div>
+        </div>
+        <div class="date-time">
+          <span id="currentDate">—</span>
+          <strong id="currentTime">—</strong>
+        </div>
+      </div>
+    </header>
+
+    <div class="pages" id="pages">
+
+      <!-- ================= HOME ================= -->
+      <section class="page is-active" id="page-home" data-title="Home">
+        <div class="dashboard-grid">
+
+          <section class="hero-weather" id="hero">
+            <div class="hero-top">
+              <div class="hero-location">
+                <svg class="i hero-location-icon"><use href="#i-pin"/></svg>
+                <div>
+                  <h2 id="cityName">Bahawalpur</h2>
+                  <p id="countryName">Punjab, Pakistan</p>
+                </div>
+              </div>
+              <div class="hero-actions">
+                <button class="round-btn" id="favBtn" type="button" aria-pressed="false" aria-label="Save this city" title="Save city"><svg class="i"><use href="#i-star"/></svg></button>
+                <button class="round-btn" id="soundBtn" type="button" aria-pressed="false" aria-label="Weather sounds" title="Weather sounds"><svg class="i"><use href="#i-mute"/></svg></button>
+                <button class="pill-btn" id="speakBtn" type="button" aria-label="Listen to the weather report"><svg class="i"><use href="#i-speaker"/></svg><span>Listen</span></button>
+              </div>
+            </div>
+
+            <div class="main-weather-content">
+              <div class="main-weather-icon" id="mainWeatherIcon" aria-hidden="true"></div>
+              <div class="temperature">
+                <span id="temperature">--</span><span class="temperature-unit">°</span><span class="temperature-celsius" id="tempScale">C</span>
+              </div>
+            </div>
+
+            <h3 id="weatherDescription">Loading…</h3>
+            <p class="feels-like">Feels like <strong id="feelsLike">--°</strong></p>
+
+            <div class="weather-summary">
+              <p id="summaryLine1">Getting the latest conditions…</p>
+              <p id="summaryLine2"></p>
+            </div>
+
+            <div class="main-weather-details">
+              <div class="main-detail"><svg class="i main-detail-icon"><use href="#i-drop"/></svg><div><span class="detail-label">Humidity</span><strong id="humidity">--</strong></div></div>
+              <div class="main-detail"><svg class="i main-detail-icon"><use href="#i-wind"/></svg><div><span class="detail-label">Wind</span><strong id="windSpeed">--</strong><small id="windDirection"></small></div></div>
+              <div class="main-detail"><svg class="i main-detail-icon"><use href="#i-gauge"/></svg><div><span class="detail-label">Pressure</span><strong id="pressure">--</strong></div></div>
+              <div class="main-detail"><svg class="i main-detail-icon"><use href="#i-eye"/></svg><div><span class="detail-label">Visibility</span><strong id="visibility">--</strong></div></div>
+            </div>
+          </section>
+
+          <section class="highlights glass-panel">
+            <h2 class="panel-heading">Today's Highlights</h2>
+            <div class="highlight-row"><div class="highlight-label"><svg class="i hi-blue"><use href="#i-thermo"/></svg><span>High / Low</span></div><strong id="highLow">--</strong></div>
+            <div class="highlight-row"><div class="highlight-label"><svg class="i hi-amber"><use href="#i-sunrise"/></svg><span>Sunrise</span></div><strong id="sunrise">--</strong></div>
+            <div class="highlight-row"><div class="highlight-label"><svg class="i hi-orange"><use href="#i-sunset"/></svg><span>Sunset</span></div><strong id="sunset">--</strong></div>
+            <div class="highlight-row"><div class="highlight-label"><svg class="i hi-amber"><use href="#i-sun"/></svg><span>UV Index</span></div><strong id="uvIndex">--</strong></div>
+            <div class="highlight-row"><div class="highlight-label"><svg class="i hi-blue"><use href="#i-rain"/></svg><span>Chance of Rain</span></div><strong id="rainChance">--</strong></div>
+          </section>
+
+          <section class="air-quality glass-panel">
+            <div class="air-quality-header">
+              <svg class="i air-quality-icon"><use href="#i-leaf"/></svg>
+              <div>
+                <h2>Air Quality</h2>
+                <strong id="airQualityStatus">--</strong>
+              </div>
+              <div class="aqi-badge" id="aqiBadge"><span>AQI</span><strong id="aqiValue">--</strong></div>
+            </div>
+            <div class="aqi-bar"><span class="aqi-marker" id="aqiMarker"></span></div>
+            <p id="airQualityDescription">Loading air quality…</p>
+          </section>
+
+          <section class="forecast-section glass-panel">
+            <div class="section-title"><svg class="i"><use href="#i-calendar"/></svg><h2>7-Day Forecast</h2></div>
+            <div class="forecast-list" id="forecastList"></div>
+          </section>
+
+          <section class="rain-radar glass-panel">
+            <div class="radar-header">
+              <div class="section-title"><svg class="i"><use href="#i-radar"/></svg><h2>Rain Radar</h2></div>
+              <span class="live-badge" id="radarLive"><span></span>Live</span>
+            </div>
+            <div class="radar-map" id="radarMapWrap">
+              <div id="miniRadar" class="mini-radar"></div>
+              <div class="radar-fallback" id="radarFallback"><div class="radar-grid"></div><div class="radar-blobs"></div></div>
+              <div class="radar-location"><svg class="i"><use href="#i-pin"/></svg><strong id="radarCity">Bahawalpur</strong></div>
+              <div class="map-controls">
+                <button type="button" id="zoomIn" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
+                <button type="button" id="zoomOut" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
+              </div>
+            </div>
+          </section>
+
+          <section class="weather-news glass-panel">
+            <div class="news-label"><svg class="i news-speaker"><use href="#i-speaker"/></svg><strong>Weather News</strong></div>
+            <span class="news-divider"></span>
+            <p id="weatherNews">Checking the latest weather updates…</p>
+            <button type="button" class="news-listen" id="newsSpeak" aria-label="Read headline aloud"><svg class="i"><use href="#i-play"/></svg></button>
+            <a class="view-more-button" id="viewMoreNews" href="#/news">View More <svg class="i"><use href="#i-arrow"/></svg></a>
+          </section>
+        </div>
+      </section>
+
+      <!-- ================= 7-DAY FORECAST ================= -->
+      <section class="page" id="page-forecast" data-title="7-Day Forecast">
+        <div class="page-head">
+          <div><h2>7-Day Forecast</h2><p id="fcSub">Tap a day to see the hour-by-hour breakdown.</p></div>
+          <div class="head-actions"><button class="pill-btn" id="fcSpeak" type="button"><svg class="i"><use href="#i-speaker"/></svg><span>Read forecast</span></button></div>
+        </div>
+        <div class="fc-layout">
+          <div class="fc-main">
+            <div class="panel fc-selected" id="fcSelected"></div>
+            <div class="panel">
+              <div class="panel-top"><h3>Hour by hour</h3>
+                <div class="seg" id="fcMetric" role="group" aria-label="Chart metric">
+                  <button type="button" class="on" data-metric="temp">Temperature</button>
+                  <button type="button" data-metric="rain">Rain</button>
+                  <button type="button" data-metric="wind">Wind</button>
+                </div>
+              </div>
+              <div class="chart" id="fcChart"></div>
+              <div class="hourly-strip" id="fcHourly"></div>
+            </div>
+          </div>
+          <aside class="panel fc-days"><h3>This week</h3><div id="fcDays"></div></aside>
+        </div>
+      </section>
+
+      <!-- ================= RADAR ================= -->
+      <section class="page" id="page-radar" data-title="Radar">
+        <div class="page-head">
+          <div><h2>Rain Radar</h2><p id="radarSub">Live precipitation over the last two hours.</p></div>
+          <span class="live-badge" id="radarLive2"><span></span>Live</span>
+        </div>
+        <div class="radar-layout">
+          <div class="panel map-panel">
+            <div id="radarMap" class="big-map"></div>
+            <div class="map-toolbar">
+              <button class="round-btn solid" id="radarPlay" type="button" aria-label="Play radar animation"><svg class="i"><use href="#i-play"/></svg></button>
+              <input class="range" id="radarSlider" type="range" min="0" max="0" value="0" aria-label="Radar time">
+              <span class="map-time" id="radarTime">--:--</span>
+            </div>
+            <div class="map-legend"><span>Light</span><i></i><span>Heavy</span></div>
+            <div class="map-msg" id="radarMsg" hidden></div>
+          </div>
+          <aside class="side-stack">
+            <div class="panel"><h3>Rain outlook</h3><p class="muted" id="rainOutlookText">--</p><div class="chart small" id="rainOutlook"></div></div>
+            <div class="panel">
+              <h3>Map options</h3>
+              <div class="opt-row"><span>Base map</span>
+                <div class="seg" id="radarBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button></div></div>
+              <div class="opt-row"><span>Radar opacity</span><input class="range" id="radarOpacity" type="range" min="20" max="100" value="80" aria-label="Radar opacity"></div>
+              <button class="pill-btn wide" id="radarCenter" type="button"><svg class="i"><use href="#i-target"/></svg><span>Centre on my city</span></button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ================= MAPS ================= -->
+      <section class="page" id="page-maps" data-title="Maps">
+        <div class="page-head">
+          <div><h2>Weather Map</h2><p>Live temperatures across cities. Click anywhere on the map for its weather.</p></div>
+          <div class="head-actions">
+            <div class="seg" id="mapSet"><button type="button" class="on" data-set="pk">Pakistan</button><button type="button" data-set="world">World</button><button type="button" data-set="saved">Saved</button></div>
+            <div class="seg" id="mapBase"><button type="button" class="on" data-base="dark">Dark</button><button type="button" data-base="sat">Satellite</button><button type="button" data-base="terrain">Terrain</button></div>
+            <label class="switch-chip"><input type="checkbox" id="mapRadar"><span>Radar overlay</span></label>
+          </div>
+        </div>
+        <div class="maps-layout">
+          <div class="panel map-panel"><div id="worldMap" class="big-map"></div><div class="map-msg" id="mapsMsg" hidden></div></div>
+          <aside class="panel city-list-panel">
+            <h3>Cities</h3>
+            <div class="extremes" id="mapExtremes"></div>
+            <ul class="city-list" id="mapCityList"></ul>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ================= NEWS ================= -->
+      <section class="page" id="page-news" data-title="News">
+        <div class="page-head">
+          <div><h2>Weather News</h2><p id="newsSub">Smart alerts and advice built from live forecast data.</p></div>
+        </div>
+        <div class="panel brief" id="newsBrief"></div>
+        <div class="chips" id="newsFilters" role="group" aria-label="News filter">
+          <button type="button" class="chip on" data-cat="all">All</button>
+          <button type="button" class="chip" data-cat="alert">Alerts</button>
+          <button type="button" class="chip" data-cat="health">Health</button>
+          <button type="button" class="chip" data-cat="travel">Travel</button>
+          <button type="button" class="chip" data-cat="farm">Farming</button>
+          <button type="button" class="chip" data-cat="outlook">Outlook</button>
+        </div>
+        <div class="news-grid" id="newsGrid"></div>
+        <p class="fine-print">These updates are generated automatically from Open-Meteo forecast and air-quality data. They are not official warnings, so please follow your national weather service for official advisories.</p>
+      </section>
+
+      <!-- ================= SETTINGS ================= -->
+      <section class="page" id="page-settings" data-title="Settings">
+        <div class="page-head"><div><h2>Settings</h2><p>Your choices are saved on this device.</p></div></div>
+        <div class="settings-grid">
+
+          <div class="panel">
+            <h3>Units</h3>
+            <div class="opt-row"><span>Temperature</span><div class="seg" data-seg="tempUnit"><button type="button" data-value="c">°C</button><button type="button" data-value="f">°F</button></div></div>
+            <div class="opt-row"><span>Wind speed</span><div class="seg" data-seg="windUnit"><button type="button" data-value="kmh">km/h</button><button type="button" data-value="mph">mph</button><button type="button" data-value="ms">m/s</button></div></div>
+            <div class="opt-row"><span>Pressure</span><div class="seg" data-seg="pressureUnit"><button type="button" data-value="hpa">hPa</button><button type="button" data-value="inhg">inHg</button><button type="button" data-value="mmhg">mmHg</button></div></div>
+            <div class="opt-row"><span>Clock</span><div class="seg" data-seg="clock"><button type="button" data-value="12">12-hour</button><button type="button" data-value="24">24-hour</button></div></div>
+          </div>
+
+          <div class="panel">
+            <h3>Voice</h3>
+            <div class="opt-row"><span>Weather voice</span><label class="switch"><input type="checkbox" data-switch="voiceOn"><i></i></label></div>
+            <div class="opt-row"><span>Language</span><div class="seg" data-seg="voiceLang"><button type="button" data-value="en">English</button><button type="button" data-value="ur">اردو</button><button type="button" data-value="ro">Roman Urdu</button></div></div>
+            <div class="opt-row"><span>Voice</span><select class="select" id="voiceSelect" aria-label="Voice"></select></div>
+            <div class="opt-row"><span>Speed</span><input class="range" type="range" min="0.6" max="1.4" step="0.05" data-range="voiceRate" aria-label="Speech speed"></div>
+            <div class="opt-row"><span>Pitch</span><input class="range" type="range" min="0.6" max="1.4" step="0.05" data-range="voicePitch" aria-label="Speech pitch"></div>
+            <div class="opt-row"><span>Speak when I change city</span><label class="switch"><input type="checkbox" data-switch="autoSpeak"><i></i></label></div>
+            <div class="btn-row"><button class="pill-btn" id="voiceTest" type="button"><svg class="i"><use href="#i-play"/></svg><span>Test voice</span></button><span class="muted" id="voiceHint"></span></div>
+          </div>
+
+          <div class="panel">
+            <h3>Sound &amp; animation</h3>
+            <div class="opt-row"><span>Weather sounds (rain, wind, thunder)</span><label class="switch"><input type="checkbox" data-switch="soundOn"><i></i></label></div>
+            <div class="opt-row"><span>Sound volume</span><input class="range" type="range" min="0" max="1" step="0.05" data-range="soundVol" aria-label="Sound volume"></div>
+            <div class="opt-row"><span>Scene</span><div class="seg" data-seg="sceneStyle"><button type="button" data-value="live">Live time</button><button type="button" data-value="golden">Golden hour</button></div></div>
+            <div class="opt-row"><span>Animation</span><div class="seg" data-seg="motion"><button type="button" data-value="auto">Auto</button><button type="button" data-value="full">Full</button><button type="button" data-value="reduced">Calm</button><button type="button" data-value="off">Off</button></div></div>
+            <div class="opt-row"><span>Quality</span><div class="seg" data-seg="quality"><button type="button" data-value="high">High</button><button type="button" data-value="balanced">Balanced</button><button type="button" data-value="low">Light</button></div></div>
+          </div>
+
+          <div class="panel">
+            <h3>Saved cities</h3>
+            <ul class="saved-list" id="savedList"></ul>
+            <p class="muted" id="savedEmpty">Tap the star on the home screen to save a city.</p>
+          </div>
+
+          <div class="panel">
+            <h3>Data</h3>
+            <div class="opt-row"><span>Auto refresh</span><div class="seg" data-seg="autoRefresh"><button type="button" data-value="0">Off</button><button type="button" data-value="15">15 min</button><button type="button" data-value="30">30 min</button><button type="button" data-value="60">1 hour</button></div></div>
+            <div class="btn-row">
+              <button class="pill-btn" id="refreshNow" type="button"><svg class="i"><use href="#i-refresh"/></svg><span>Refresh now</span></button>
+              <button class="pill-btn danger" id="resetAll" type="button"><svg class="i"><use href="#i-trash"/></svg><span>Reset settings</span></button>
+            </div>
+            <p class="muted" id="updatedAt">Not updated yet.</p>
+          </div>
+
+          <div class="panel about">
+            <h3>About SkyWatch</h3>
+            <p class="muted">Forecasts and air quality come from Open-Meteo. Radar tiles are provided by RainViewer, and maps by OpenStreetMap, CARTO and Esri.</p>
+            <p class="muted">Shortcuts: <kbd>Ctrl</kbd>+<kbd>K</kbd> search · <kbd>Alt</kbd>+<kbd>R</kbd> refresh · <kbd>Alt</kbd>+<kbd>V</kbd> listen</p>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <div id="statusMessage" class="status-message" aria-live="polite"></div>
+    <div id="errorMessage" class="error-message" role="alert" hidden></div>
+  </main>
+</div>
+
+<!-- Speaking pill -->
+<div class="voice-pill" id="voicePill" hidden>
+  <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <span id="voiceCaption">Speaking…</span>
+  <button type="button" id="voiceStop" aria-label="Stop speaking"><svg class="i"><use href="#i-stop"/></svg></button>
+</div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay" aria-hidden="true">
+  <div class="loading-card"><div class="loading-spinner"></div><h2>Loading weather</h2><p>Getting the latest data…</p></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toastMessage"></span></div>
+
+<script src="script.js"></script>
+</body>
+</html>
